@@ -1,6 +1,1 @@
-192.168.1.10	pi	/home/pi	/home/dwd/sshfs/laki/
-192.168.1.11	dwd 	/home/dwd 	/home/dwd/sshfs/askja/
-192.168.1.201	pi	/home/pi	/home/dwd/sshfs/surtsey/
-192.168.1.213	dwd	/home/dwd	/home/dwd/sshfs/vatnafjoll/
-192.168.1.248	dwd	/home/dwd	/home/dwd/sshfs/eldfell/
-192.168.1.219	pi	/home/pi	/home/dwd/sshfs/reykjanes
+192.168.1.10	user	/home/user	/home/user/sshfs/remote_hostname/
