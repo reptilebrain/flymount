@@ -1,2 +1,3 @@
-# sshfs-mount - This is a simple Bash script that mount remote folders via sshfs.
-Why is the text so big?
+# sshfs-mount
+This is a simple Bash script that mount remote folders via sshfs.
+You need to set up your SSH keys before this script works properly. I recommend that you use ssh-copy-id for a smooth ride.
