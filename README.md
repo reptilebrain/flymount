@@ -6,4 +6,4 @@ Edit sshfs.lst with your credentials.
 
 **Syntax: Ip  Username  Remote folder Local folder**
 
-*Example:* 192.168.1.58 vader /home/vader /home/vader/sshfs/deathstar
+*Example:* 192.168.1.58 vader /home/vader /home/deathstar/sshfs/vader
