@@ -1,8 +1,14 @@
 #!/bin/bash
 
 # flymount - A simple script to mount remote folders via sshfs.
-
+# Copyright (C) 2026  P-A Jonasson
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
 # Colors for output
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 NC='\033[0m' # No Color
