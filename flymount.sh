@@ -328,8 +328,8 @@ next_available_name() {
   if [[ -z "${seen[$base]+x}" ]]; then
     seen["$base"]=1
     counter["$base"]=1
-    printf "%s" "$base"
-    return
+    NEXT_AVAILABLE_NAME="$base"
+    return 0
   fi
 
   local n="${counter[$base]:-1}"
@@ -339,8 +339,8 @@ next_available_name() {
     if [[ -z "${seen[$candidate]+x}" ]]; then
       counter["$base"]="$n"
       seen["$candidate"]=1
-      printf "%s" "$candidate"
-      return
+      NEXT_AVAILABLE_NAME="$candidate"
+      return 0
     fi
   done
 }
@@ -555,7 +555,8 @@ build_plan() {
       if [[ -z "$base" || "$base" == "_" ]]; then
         base="$(sanitize_for_dir "$host")"
       fi
-      name="$(next_available_name "$base" auto_seen_names auto_counters)"
+      next_available_name "$base" auto_seen_names auto_counters
+      name="$NEXT_AVAILABLE_NAME"
       local_path="$(resolve_local_path "$name")"
 
       if [[ "$remote_path" != /* ]]; then
