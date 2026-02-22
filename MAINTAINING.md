@@ -17,6 +17,7 @@ Before tagging a release:
 - [ ] Targets validation tests pass (`tests/test_targets_validation.sh`)
 - [ ] Installer regression test passes (`tests/test_install.sh`)
 - [ ] Uninstall regression test passes (`tests/test_uninstall.sh`)
+- [ ] Umount mode tests pass (`tests/test_umount_modes.sh`)
 - [ ] (Optional) Real target smoke test passes (`FLYMOUNT_REAL_TARGET='...' tests/test_real_target.sh`)
 - [ ] Manual test checklist passes
 - [ ] README reviewed

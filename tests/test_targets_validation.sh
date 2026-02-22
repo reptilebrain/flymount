@@ -61,6 +61,32 @@ out="$(run_dry "$case_file")"
 assert_contains "$out" "invalid port 'abc'"
 assert_contains "$out" "Nothing to do: no valid targets found"
 
+case_file="$TMP_DIR/case-bad-opts.conf"
+cat > "$case_file" <<'EOF'
+example.com user /srv/data data 22 - reconnect,,ServerAliveInterval=15
+EOF
+out="$(run_dry "$case_file")"
+assert_contains "$out" "contains malformed comma separators"
+assert_contains "$out" "Nothing to do: no valid targets found"
+
+cat > "$CONFIG_FILE" <<EOF
+CONNECT_TIMEOUT=1
+BASE_DIR=$TMP_DIR/mnt
+DEFAULT_SSHFS_OPTS=reconnect,
+EOF
+case_file="$TMP_DIR/case-valid-target-for-global-opts.conf"
+cat > "$case_file" <<'EOF'
+example.com user /srv/data data 22 - reconnect
+EOF
+out="$(run_dry "$case_file")"
+assert_contains "$out" "Options error:"
+assert_contains "$out" "DEFAULT_SSHFS_OPTS"
+
+cat > "$CONFIG_FILE" <<EOF
+CONNECT_TIMEOUT=1
+BASE_DIR=$TMP_DIR/mnt
+EOF
+
 case_file="$TMP_DIR/case-duplicate-local.conf"
 cat > "$case_file" <<'EOF'
 example.com user /srv/a dup 22 - reconnect

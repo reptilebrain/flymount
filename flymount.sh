@@ -35,6 +35,8 @@ TARGETS_FILE="${FLYMOUNT_TARGETS:-$DEFAULT_TARGETS}"
 DRY_RUN=0
 UMOUNT=0
 STATUS=0
+UMOUNT_ALL=0
+UMOUNT_SELECTION=""
 
 # "Real config" defaults (overridable by config file and/or env)
 CONNECT_TIMEOUT="${CONNECT_TIMEOUT:-5}"
@@ -79,6 +81,8 @@ Options:
   --dry-run, -d     Show what would be mounted (with preflight checks)
   --status, -s      Show mount status for planned targets
   --umount, -u      Interactive unmount (shows only currently mounted targets)
+  --umount-all      Non-interactive: unmount all currently mounted planned targets
+  --umount-select   Non-interactive: unmount selected targets by index/path (comma or space separated)
   --help, -h        Show this help
   --version, -v     Show version
 
@@ -118,6 +122,9 @@ Examples:
   ./flymount.sh --dry-run
   ./flymount.sh --status
   ./flymount.sh --umount
+  ./flymount.sh --umount-all
+  ./flymount.sh --umount-select "1 2"
+  ./flymount.sh --umount-select "/home/user/mnt/web,/home/user/mnt/logs"
   ./flymount.sh --targets ./targets.conf
   ./flymount.sh --config  ./flymount.conf
   BASE_DIR="/home/user/mnt" ./flymount.sh
@@ -143,6 +150,14 @@ while (($#)); do
       ;;
     --dry-run|-d) DRY_RUN=1; shift ;;
     --umount|-u)  UMOUNT=1; shift ;;
+    --umount-all) UMOUNT=1; UMOUNT_ALL=1; shift ;;
+    --umount-select)
+      shift || die "--umount-select requires a value"
+      [[ -n "${1:-}" ]] || die "--umount-select requires a value"
+      UMOUNT=1
+      UMOUNT_SELECTION="$1"
+      shift
+      ;;
     --status|-s)  STATUS=1; shift ;;
     --help|-h)    show_help; exit 0 ;;
     --version|-v) echo "flymount v$VERSION"; exit 0 ;;
@@ -177,8 +192,6 @@ check_prereqs() {
   require mountpoint
   detect_fusermount || die "Missing dependency: fusermount (or fusermount3)"
   require mktemp
-  require getent
-  require cut
   require tr
   require seq
   require dirname
@@ -357,6 +370,41 @@ merge_sshfs_opts() {
   printf "%s,%s" "$a" "$b"
 }
 
+validate_sshfs_opts() {
+  local opts="$1"
+  local origin="$2"
+
+  [[ -z "$opts" || "$opts" == "-" ]] && return 0
+
+  if [[ "$opts" =~ [[:space:]] ]]; then
+    printf "%bOptions error:%b %s contains whitespace: '%s'\n" "$RED" "$NC" "$origin" "$opts"
+    printf "Tip: use comma-separated sshfs options without spaces.\n"
+    return 1
+  fi
+
+  if [[ "$opts" == *",,"* || "$opts" == ","* || "$opts" == *"," ]]; then
+    printf "%bOptions error:%b %s contains malformed comma separators: '%s'\n" "$RED" "$NC" "$origin" "$opts"
+    return 1
+  fi
+
+  local part
+  local parts=()
+  read -r -a parts <<< "${opts//,/ }"
+  for part in "${parts[@]}"; do
+    if [[ -z "$part" ]]; then
+      printf "%bOptions error:%b %s contains an empty option segment: '%s'\n" "$RED" "$NC" "$origin" "$opts"
+      return 1
+    fi
+    if [[ "$part" == -* ]]; then
+      printf "%bOptions error:%b %s contains a '-' prefixed segment: '%s'\n" "$RED" "$NC" "$origin" "$part"
+      printf "Tip: pass bare sshfs option names (without leading '-') in sshfs options.\n"
+      return 1
+    fi
+  done
+
+  return 0
+}
+
 check_fuse_available() {
   if [[ ! -e /dev/fuse ]]; then
     printf "%bFUSE error:%b /dev/fuse does not exist\n" "$RED" "$NC"
@@ -414,6 +462,10 @@ validate_target_fields() {
 
   if [[ -z "$remote_path" ]]; then
     printf "%bTargets error:%b remote_path is empty for host %s\n" "$RED" "$NC" "$host"
+    return 1
+  fi
+
+  if ! validate_sshfs_opts "$opts" "sshfs_options for ${host}:${remote_path}"; then
     return 1
   fi
 
@@ -718,49 +770,86 @@ interactive_umount_from_plan() {
     return
   fi
 
-  printf "\nSelect number(s) to unmount (e.g. 1 2) or 'a' for all: "
-  read -r selection
-
-  if [[ -z "${selection:-}" ]]; then
-    printf "%bNo selection entered.%b Nothing unmounted.\n" "$YELLOW" "$NC"
-    return
-  fi
-
-  if [[ "$selection" == "a" ]]; then
+  local selection=""
+  if [[ "$UMOUNT_ALL" -eq 1 ]]; then
     printf "Selected: all (%d)\n" "${#mounts[@]}"
-    selection=$(seq 1 "${#mounts[@]}")
-  else
+    selection="$(seq 1 "${#mounts[@]}")"
+  elif [[ -n "$UMOUNT_SELECTION" ]]; then
+    selection="${UMOUNT_SELECTION//,/ }"
     printf "Selected: %s\n" "$selection"
+  else
+    printf "\nSelect number(s) to unmount (e.g. 1 2), mount path(s), or 'a' for all: "
+    read -r selection
+
+    if [[ -z "${selection:-}" ]]; then
+      printf "%bNo selection entered.%b Nothing unmounted.\n" "$YELLOW" "$NC"
+      return
+    fi
+
+    if [[ "$selection" == "a" ]]; then
+      printf "Selected: all (%d)\n" "${#mounts[@]}"
+      selection=$(seq 1 "${#mounts[@]}")
+    else
+      printf "Selected: %s\n" "$selection"
+    fi
   fi
 
   local did_any=0
   local invalid_any=0
+  local pick=""
+  local pick_idx=0
+  declare -A picked=()
 
-  for num in $selection; do
-    if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#mounts[@]} )); then
-      local target="${mounts[$((num-1))]}"
-      local r="${remotes[$((num-1))]}"
-      did_any=1
-
-      if [[ "$DRY_RUN" -eq 1 ]]; then
-        printf "%bDRY%b Unmount %s (%s)\n" "$YELLOW" "$NC" "$target" "$r"
-      else
-        local out=""
-        if out="$("$FUSERMOUNT_BIN" -u "$target" 2>&1)"; then
-          printf "Unmount %s %bOK%b (remote files no longer visible)\n" "$target" "$GREEN" "$NC"
-        else
-          printf "Unmount %s %bFAILED%b\n" "$target" "$RED" "$NC"
-          [[ -n "$out" ]] && printf "Reason: %s\n" "$out"
-          printf "Tip: close shells using the mount, or try: %s -uz '%s'\n" "$FUSERMOUNT_BIN" "$target"
-        fi
-      fi
+  for pick in $selection; do
+    pick_idx=0
+    if [[ "$pick" =~ ^[0-9]+$ ]] && (( pick >= 1 && pick <= ${#mounts[@]} )); then
+      pick_idx="$pick"
     else
-      invalid_any=1
+      local found=0
+      local i=0
+      for i in "${!mounts[@]}"; do
+        if [[ "${mounts[$i]}" == "$pick" ]]; then
+          pick_idx=$((i+1))
+          found=1
+          break
+        fi
+      done
+      if [[ "$found" -eq 0 ]]; then
+        invalid_any=1
+        continue
+      fi
+    fi
+
+    if [[ -n "${picked[$pick_idx]+x}" ]]; then
+      continue
+    fi
+    picked["$pick_idx"]=1
+
+    local idx0=$((pick_idx-1))
+    local target="${mounts[$idx0]}"
+    local r="${remotes[$idx0]}"
+    did_any=1
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      printf "%bDRY%b Unmount %s (%s)\n" "$YELLOW" "$NC" "$target" "$r"
+    else
+      local out=""
+      if out="$("$FUSERMOUNT_BIN" -u "$target" 2>&1)"; then
+        printf "Unmount %s %bOK%b (remote files no longer visible)\n" "$target" "$GREEN" "$NC"
+      else
+        printf "Unmount %s %bFAILED%b\n" "$target" "$RED" "$NC"
+        [[ -n "$out" ]] && printf "Reason: %s\n" "$out"
+        printf "Tip: close shells using the mount, or try: %s -uz '%s'\n" "$FUSERMOUNT_BIN" "$target"
+      fi
     fi
   done
 
   if [[ "$did_any" -eq 0 ]]; then
-    printf "%bNo valid selection.%b Nothing unmounted.\n" "$YELLOW" "$NC"
+    if [[ -n "$UMOUNT_SELECTION" ]]; then
+      printf "%bNo valid selection.%b Nothing unmounted. (use index or full mount path)\n" "$YELLOW" "$NC"
+    else
+      printf "%bNo valid selection.%b Nothing unmounted.\n" "$YELLOW" "$NC"
+    fi
     return
   fi
 
@@ -770,14 +859,46 @@ interactive_umount_from_plan() {
 }
 
 # -------------------------
+# CLI mode validation
+# -------------------------
+validate_mode_flags() {
+  local mode_count=0
+  (( DRY_RUN == 1 )) && ((mode_count++))
+  (( STATUS == 1 )) && ((mode_count++))
+  (( UMOUNT == 1 )) && ((mode_count++))
+
+  if (( mode_count > 1 )); then
+    die "Choose only one mode: --dry-run, --status, --umount/--umount-all/--umount-select"
+  fi
+
+  if [[ "$UMOUNT_ALL" -eq 1 && -n "$UMOUNT_SELECTION" ]]; then
+    die "--umount-all and --umount-select cannot be used together"
+  fi
+}
+
+detect_platform() {
+  local platform
+  platform="$(uname -s 2>/dev/null || printf "unknown")"
+  if [[ "$platform" != "Linux" ]]; then
+    warn "Detected platform '$platform'. flymount is currently tested primarily on Linux (sshfs/fusermount/FUSE)."
+  fi
+}
+
+# -------------------------
 # Main
 # -------------------------
 main() {
   refuse_root
+  validate_mode_flags
+  detect_platform
   check_prereqs
 
   # Load config file (optional)
   load_config_file "$CONFIG_FILE"
+
+  if ! validate_sshfs_opts "$DEFAULT_SSHFS_OPTS" "DEFAULT_SSHFS_OPTS"; then
+    exit 1
+  fi
 
   if ! BASE_DIR="$(normalize_base_dir "$BASE_DIR")"; then
     exit 1

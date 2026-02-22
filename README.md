@@ -73,6 +73,7 @@ Key options:
 - `SSH_STRICT_HOSTKEY` (`yes | accept-new | no`, default: `yes`)
 - `CONNECT_TIMEOUT` (seconds, default: `5`)
 - `DEFAULT_SSHFS_OPTS` (comma-separated sshfs `-o` options)
+  - must be comma-separated without spaces
 
 See `flymount.conf.example`.
 
@@ -100,6 +101,7 @@ Field meanings:
 - `sshfs_options`:
   - `-` none
   - `reconnect,ServerAliveInterval=15` (comma-separated)
+  - must be comma-separated without spaces
 
 See `targets.conf.example`.
 
@@ -110,6 +112,9 @@ flymount
 flymount --dry-run
 flymount --status
 flymount --umount
+flymount --umount-all
+flymount --umount-select "1 2"
+flymount --umount-select "/home/user/mnt/web,/home/user/mnt/logs"
 ```
 
 ## Safety model (important)
@@ -138,6 +143,7 @@ If you want to mount outside `$HOME`, fix ownership/permissions on the mountpoin
 ### Unmount
 - ✔️ No active mounts
 - ✔️ Select specific mounts
+- ✔️ Non-interactive unmount (`--umount-all`, `--umount-select`)
 - ✔️ Invalid selection handling
 
 ### Status
