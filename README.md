@@ -1,89 +1,164 @@
-# flymount 🚀
+# flymount
 
-A lightweight Bash script to batch-mount remote directories via SSHFS using a simple CSV configuration file.
-Features
+![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![ShellCheck](https://img.shields.io/badge/shellcheck-passing-brightgreen)
 
-**CSV Powered:** Manage your mount points in a clean, header-supported `targets.conf`.
+Deterministic multi-SSHFS mount helper (Bash).
 
-**Safe:** Skips already mounted directories and checks if the host is online before attempting to mount.
+- **User-space only** (root/sudo is refused)
+- **Plan-based** (build plan → execute)
+- **Strict targets validation** with clear error messages
 
-**Robust:** Handles comments, empty lines, and Windows-style line endings (\r).
-
-**Clean Output:** Color-coded status messages for quick oversight.
-
-## Prerequisites
-
-**SSHFS: Must be installed on your local machine.**
+## Quick start
 
 ```bash
-sudo apt update && sudo apt install sshfs
-```
+# 1) Install (user-local)
+./install.sh
 
-**SSH Keys:** Crucial. This script is designed for non-interactive use. You should have your SSH public key copied to the remote hosts to avoid password prompts.
+# 2) Copy example configs
+mkdir -p ~/.config/flymount
+cp flymount.conf.example ~/.config/flymount/flymount.conf
+cp targets.conf.example  ~/.config/flymount/targets.conf
 
-```bash
-ssh-copy-id user@host
+# 3) Dry-run first
+flymount --dry-run
+
+# 4) Mount
+flymount
 ```
 
 ## Installation
 
-Clone this repo.
-
-Move the script to your `~/bin/` (or any directory in your PATH):
+### Install to ~/.local/bin
 
 ```bash
-mv flymount ~/bin/flymount
-chmod +x ~/bin/flymount
+chmod +x install.sh
+./install.sh
 ```
 
-Create your configuration file at `~/bin/targets.conf`.
+The installer:
+- copies the script to `~/.local/bin/flymount`
+- creates `~/.config/flymount/` if missing
+- does **not** overwrite existing config files
 
-## Configuration (targets.conf)
+### Uninstall
 
-The script expects a CSV file with a header row. You can use # for comments.
 ```bash
-host,user,remote_path,local_path
-192.168.1.10,username,/home/username/data,/home/username/mnt/server1
-## Example of a web server mount
-10.0.0.13,chuck,/var/www,/home/chuck/mnt/webserver
-## Work server
-10.0.0.42,chad,/var/www,/home/chad/mnt/webserver
+chmod +x uninstall.sh
+./uninstall.sh
 ```
+
+Uninstall removes only the binary and leaves your config directory untouched.
+
+## Configuration
+
+Config directory (XDG):
+
+- `~/.config/flymount/flymount.conf`
+- `~/.config/flymount/targets.conf`
+
+You can also override paths:
+
+- `FLYMOUNT_CONFIG=...`
+- `FLYMOUNT_TARGETS=...`
+
+### flymount.conf
+
+Format: `KEY=VALUE` (unknown keys are ignored)
+
+Key options:
+
+- `BASE_DIR` (default: `$HOME/mnt`)
+- `SSH_STRICT_HOSTKEY` (`yes | accept-new | no`, default: `yes`)
+- `CONNECT_TIMEOUT` (seconds, default: `5`)
+- `DEFAULT_SSHFS_OPTS` (comma-separated sshfs `-o` options)
+
+See `flymount.conf.example`.
+
+## targets.conf
+
+Each non-comment line must have **exactly 7 space-separated fields**:
+
+```
+host user remote_path local_mount port identity_file sshfs_options
+```
+
+Field meanings:
+
+- `host` – SSH host/IP
+- `user` – SSH username
+- `remote_path` – remote path (**absolute recommended**)
+- `local_mount`:
+  - `-` auto-generate name from remote path leaf
+  - `name` mount under `BASE_DIR/name`
+  - `/abs/path` use absolute mount path
+- `port` – numeric SSH port (e.g. `22`, `2222`)
+- `identity_file`:
+  - `-` use default SSH config/agent
+  - `/path/to/key` explicit key
+- `sshfs_options`:
+  - `-` none
+  - `reconnect,ServerAliveInterval=15` (comma-separated)
+
+See `targets.conf.example`.
 
 ## Usage
 
-Simply run the script:
-
 ```bash
 flymount
+flymount --dry-run
+flymount --status
+flymount --umount
 ```
 
-## Troubleshooting
+## Safety model (important)
 
-If a mount fails, check the following:
+- **Root/sudo is refused.**
+  Running as root changes SSH identity, ownership, and default paths.
 
-**Manual Test:** Try the command manually to see the exact error:
+If you want to mount outside `$HOME`, fix ownership/permissions on the mountpoint instead of using sudo.
 
-```bash
-sshfs user@host:/path /local/path -o nonempty
-```
+## Verified behavior
 
-**Connection Refused:** Ensure the remote host has openssh-server installed and that your SSH key is in `~/.ssh/authorized_keys`.
+### Plan / validation
+- ✔️ Plan builds correctly
+- ✔️ Auto `local_mount = -` naming (with suffix on collisions)
+- ✔️ Duplicate local mountpoints → warn, keep first, skip later
+- ✔️ Malformed line / field shift detection
+- ✔️ Non-numeric port rejection
+- ✔️ Relative `remote_path` hint + explanatory note
 
-**Mountpoint not empty:** If the local folder isn't empty, sshfs will fail unless `-o nonempty` is used (already included in the script).
+### Mounting
+- ✔️ Mount inside `$HOME`
+- ✔️ Mount outside `$HOME` with correct permissions
+- ✔️ Already mounted → SKIP
+- ✔️ Missing remote directory → clear failure
 
-**Dead Mounts:** If a connection drops, the mount might hang. Force unmount with:
+### Unmount
+- ✔️ No active mounts
+- ✔️ Select specific mounts
+- ✔️ Invalid selection handling
 
-```bash
-fusermount -u /home/username/mnt/server1
-```
+### Status
+- ✔️ Accurate MOUNTED / NOT output
 
-**Permissions**: Ensure your user is part of the fuse group if required by your distro.
+ShellCheck: PASS
+
+## Release notes (GitHub)
+
+See the GitHub Releases page for version history.
 
 ## Disclaimer
 
-This script is provided "as is", without warranty of any kind. Use it at your own risk. The author is not responsible for any data loss or connectivity issues caused by the use of this script.
+`flymount` executes `sshfs` directly.
+
+- It does not sandbox remote access.
+- Bad targets can mount unintended locations.
+- Always review `targets.conf` and use `--dry-run` before mounting.
+
+Use at your own risk.
 
 ## License
 
-This project is licensed under the GPL-3.0 License. See the [LICENSE](LICENSE) file for details.
+MIT. See [LICENSE](LICENSE).

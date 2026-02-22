@@ -1,0 +1,22 @@
+# flymount.conf.example
+# Copy to:
+#   ~/.config/flymount/flymount.conf
+#
+# All values can also be overridden by environment variables.
+
+# Base directory for relative mount names (local_mount = name)
+BASE_DIR="$HOME/mnt"
+
+# SSH host key behavior:
+#   yes         = strict (recommended)
+#   accept-new  = auto-accept new hosts
+#   no          = disable checking (not recommended)
+SSH_STRICT_HOSTKEY="yes"
+
+# SSH connect timeout (seconds)
+CONNECT_TIMEOUT="5"
+
+# Extra sshfs -o options applied to ALL mounts (comma-separated)
+# Example:
+# DEFAULT_SSHFS_OPTS="reconnect,ServerAliveInterval=15,ServerAliveCountMax=3"
+DEFAULT_SSHFS_OPTS=""

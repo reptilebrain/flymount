@@ -1,0 +1,29 @@
+# Maintaining flymount
+
+This document is for maintainers only.
+
+## Versioning
+
+- Semantic-ish versioning: MAJOR.MINOR.PATCH
+- Tag format: `vX.Y.Z`
+- Keep CHANGELOG in GitHub Releases (not duplicated in README)
+
+## Pre-release checklist
+
+Before tagging a release:
+
+- [ ] ShellCheck clean
+- [ ] Manual test checklist passes
+- [ ] README reviewed
+- [ ] install.sh / uninstall.sh verified
+- [ ] Example configs up to date
+- [ ] No debug output left
+
+## Tagging a release
+
+```bash
+git add .
+git commit -m "v1.0.0: release"
+git tag -a v1.0.0 -m "Initial public release"
+git push origin main
+git push origin v1.0.0

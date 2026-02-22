@@ -1,0 +1,22 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+*.swp
+*.swo
+*.bak
+*~
+
+# Local config (never commit real user configs)
+flymount.conf
+targets.conf
+
+# Installed binaries
+flymount
+
+# Tarballs
+*.tar.gz
+
+# Temporary files
+/tmp/

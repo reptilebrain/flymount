@@ -1,0 +1,24 @@
+# targets.conf.example
+# Copy to:
+#   ~/.config/flymount/targets.conf
+#
+# Format:
+# host user remote_path local_mount port identity_file sshfs_options
+#
+# Exactly 7 space-separated fields per line.
+# Use '-' for fields you want to omit.
+
+# Internal lab server example
+192.0.2.10 alice /srv/projects web-projects 22 - reconnect
+
+# Backup server example
+198.51.100.25 backup /data/archive backup-archive 22 - reconnect,ServerAliveInterval=15
+
+# Auto-generated local mount name (local_mount = -)
+203.0.113.50 media /mnt/storage - 22 - reconnect
+
+# Absolute local mount path
+192.0.2.42 devuser /opt/dev /home/alice/mnt/devserver 2222 - reconnect
+
+# Using explicit SSH key
+198.51.100.77 ops /var/log logs 22 /home/alice/.ssh/id_ed25519 reconnect
