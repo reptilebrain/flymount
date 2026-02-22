@@ -7,7 +7,7 @@ SCRIPT="$ROOT_DIR/flymount.sh"
 if [[ -z "${FLYMOUNT_REAL_TARGET:-}" ]]; then
   printf "SKIP: set FLYMOUNT_REAL_TARGET to run this smoke test.\n"
   printf "Example:\n"
-  printf "  FLYMOUNT_REAL_TARGET='192.168.32.5 perra /home/perra/testshare rpi-test 22 - reconnect' tests/test_real_target.sh\n"
+  printf "  FLYMOUNT_REAL_TARGET='host user /remote/path local-mount 22 - reconnect' tests/test_real_target.sh\n"
   exit 0
 fi
 
