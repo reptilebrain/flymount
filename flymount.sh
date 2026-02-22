@@ -176,6 +176,7 @@ check_prereqs() {
   require sshfs
   require mountpoint
   detect_fusermount || die "Missing dependency: fusermount (or fusermount3)"
+  require mktemp
   require getent
   require cut
   require tr
@@ -514,8 +515,29 @@ build_plan() {
   # shellcheck disable=SC2034
   declare -A auto_counters=()
 
-  while read -r host user remote_path local_spec port keyfile opts || [[ -n "${host:-}" ]]; do
-    [[ -z "${host:-}" || "$host" == \#* ]] && continue
+  local line=""
+  local line_no=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    ((line_no++))
+    line="$(trim_ws "$line")"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+
+    local fields=()
+    read -r -a fields <<< "$line"
+    if [[ "${#fields[@]}" -ne 7 ]]; then
+      printf "%bTargets error:%b malformed line %d (expected exactly 7 fields, got %d)\n" \
+        "$RED" "$NC" "$line_no" "${#fields[@]}"
+      printf "Line: %s\n" "$line"
+      continue
+    fi
+
+    local host="${fields[0]}"
+    local user="${fields[1]}"
+    local remote_path="${fields[2]}"
+    local local_spec="${fields[3]}"
+    local port="${fields[4]}"
+    local keyfile="${fields[5]}"
+    local opts="${fields[6]}"
 
     validate_target_fields "$host" "$user" "$remote_path" "$local_spec" "$port" "$keyfile" "$opts" || continue
 
@@ -623,7 +645,12 @@ process_target() {
     return
   fi
 
-  local tmp="/tmp/flymount_mkdir_err.$$"
+  local tmp=""
+  if ! tmp="$(mktemp)"; then
+    printf "%bInternal error:%b failed to create temporary file\n" "$RED" "$NC"
+    return
+  fi
+
   if ! mkdir -p "$local_path" 2> "$tmp"; then
     local err
     err="$(cat "$tmp" 2>/dev/null || true)"

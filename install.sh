@@ -3,14 +3,16 @@ set -euo pipefail
 
 APP_NAME="flymount"
 BIN_NAME="flymount.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 INSTALL_DIR="$HOME/.local/bin"
 INSTALL_BIN="$INSTALL_DIR/flymount"
 
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/flymount"
 
-DEFAULT_CONFIG_SOURCE="./flymount.conf.example"
-DEFAULT_TARGETS_SOURCE="./targets.conf.example"
+BIN_SOURCE="$SCRIPT_DIR/$BIN_NAME"
+DEFAULT_CONFIG_SOURCE="$SCRIPT_DIR/flymount.conf.example"
+DEFAULT_TARGETS_SOURCE="$SCRIPT_DIR/targets.conf.example"
 
 echo "Installing $APP_NAME..."
 
@@ -18,12 +20,12 @@ echo "Installing $APP_NAME..."
 mkdir -p "$INSTALL_DIR"
 
 # Copy executable
-if [[ ! -f "$BIN_NAME" ]]; then
-  echo "Error: $BIN_NAME not found in current directory."
+if [[ ! -f "$BIN_SOURCE" ]]; then
+  echo "Error: $BIN_SOURCE not found."
   exit 1
 fi
 
-cp "$BIN_NAME" "$INSTALL_BIN"
+cp "$BIN_SOURCE" "$INSTALL_BIN"
 chmod +x "$INSTALL_BIN"
 echo "Installed binary to $INSTALL_BIN"
 
@@ -43,7 +45,7 @@ if [[ -f "$DEFAULT_TARGETS_SOURCE" && ! -f "$CONFIG_DIR/targets.conf" ]]; then
   cp "$DEFAULT_TARGETS_SOURCE" "$CONFIG_DIR/targets.conf"
   echo "Created default targets at $CONFIG_DIR/targets.conf"
 else
-  [[ -f "$CONFIG_DIR/targets.conf" ]] && echo "Targets exists: $CONFIG_DIR/targets.conf (leaving untouched)"
+  [[ -f "$CONFIG_DIR/targets.conf" ]] && echo "Targets exist: $CONFIG_DIR/targets.conf (leaving untouched)"
 fi
 
 echo

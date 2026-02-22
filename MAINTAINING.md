@@ -13,6 +13,8 @@ This document is for maintainers only.
 Before tagging a release:
 
 - [ ] ShellCheck clean
+- [ ] Parser regression test passes (`tests/test_parser.sh`)
+- [ ] Installer regression test passes (`tests/test_install.sh`)
 - [ ] Manual test checklist passes
 - [ ] README reviewed
 - [ ] install.sh / uninstall.sh verified
