@@ -21,6 +21,7 @@ Before tagging a release:
 - [ ] (Optional) Real target smoke test passes (`FLYMOUNT_REAL_TARGET='...' tests/test_real_target.sh`)
 - [ ] Manual test checklist passes
 - [ ] README reviewed
+- [ ] README version badge updated (private repo mode: static `vX.Y.Z`)
 - [ ] install.sh / uninstall.sh verified
 - [ ] Example configs up to date
 - [ ] No debug output left
@@ -49,3 +50,8 @@ Verified manually on Ubuntu in VirtualBox:
 - unmount flow executed successfully
 - uninstall completed successfully
 ```
+
+## README badges
+
+- Private repo: keep version/license badges static in `README.md`.
+- Public repo: switch to dynamic GitHub metadata badges when verified working.

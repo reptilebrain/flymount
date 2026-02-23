@@ -1,6 +1,6 @@
 # flymount
 
-[![Version](https://img.shields.io/github/v/tag/reptilebrain/flymount?label=version)](https://github.com/reptilebrain/flymount/tags)
+[![Version](https://img.shields.io/badge/version-v1.1.0-blue)](https://github.com/reptilebrain/flymount/tags)
 [![CI](https://github.com/reptilebrain/flymount/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/reptilebrain/flymount/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
