@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a reproducible bug in flymount
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please include enough detail to reproduce.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+      placeholder: Brief description of the issue
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands and config snippets (sanitized)
+      placeholder: |
+        1. Run ...
+        2. Use config ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior / logs
+      description: Paste relevant output
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: flymount version
+      placeholder: e.g. v1.1.2
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: e.g. Ubuntu 24.04
+    validations:
+      required: true
