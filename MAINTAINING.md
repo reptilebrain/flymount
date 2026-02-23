@@ -38,7 +38,7 @@ git push origin v1.0.0
 ## Post-release
 
 - [ ] Add a short manual verification note to GitHub Release (if performed)
-- [ ] Confirm CI workflow passes on `master`
+- [ ] Confirm CI workflow passes on `main`
 
 Manual verification note template:
 
