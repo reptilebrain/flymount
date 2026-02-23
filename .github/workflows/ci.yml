@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+
+jobs:
+  shellcheck-and-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Run shellcheck
+        run: |
+          shellcheck flymount.sh install.sh uninstall.sh \
+            tests/test_parser.sh \
+            tests/test_targets_validation.sh \
+            tests/test_install.sh \
+            tests/test_uninstall.sh \
+            tests/test_umount_modes.sh \
+            tests/test_real_target.sh
+
+      - name: Run test suite
+        run: |
+          chmod +x tests/*.sh
+          tests/test_parser.sh
+          tests/test_targets_validation.sh
+          tests/test_install.sh
+          tests/test_uninstall.sh
+          tests/test_umount_modes.sh

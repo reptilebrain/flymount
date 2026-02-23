@@ -33,3 +33,19 @@ git commit -m "v1.0.0: release"
 git tag -a v1.0.0 -m "Initial public release"
 git push origin main
 git push origin v1.0.0
+```
+
+## Post-release
+
+- [ ] Add a short manual verification note to GitHub Release (if performed)
+- [ ] Confirm CI workflow passes on `master`
+
+Manual verification note template:
+
+```md
+Verified manually on Ubuntu in VirtualBox:
+- install completed successfully
+- mount flow executed successfully
+- unmount flow executed successfully
+- uninstall completed successfully
+```
