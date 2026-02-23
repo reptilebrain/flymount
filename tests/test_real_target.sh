@@ -42,7 +42,7 @@ assert_not_contains() {
   fi
 }
 
-output="$("$SCRIPT" --dry-run --config "$CONFIG_FILE" --targets "$TARGETS_FILE" 2>&1 || true)"
+output="$(bash "$SCRIPT" --dry-run --config "$CONFIG_FILE" --targets "$TARGETS_FILE" 2>&1 || true)"
 
 assert_contains "$output" "DRY Mount"
 assert_not_contains "$output" "expected exactly 7 fields"

@@ -36,7 +36,7 @@ cat > "$INVALID_TARGETS" <<'EOF'
 example.com user /srv/data data 22 - reconnect extra_field
 EOF
 
-valid_output="$("$SCRIPT" --dry-run --config "$CONFIG_FILE" --targets "$INVALID_TARGETS" 2>&1 || true)"
+valid_output="$(bash "$SCRIPT" --dry-run --config "$CONFIG_FILE" --targets "$INVALID_TARGETS" 2>&1 || true)"
 assert_contains "$valid_output" "expected exactly 7 fields, got 8"
 assert_contains "$valid_output" "Nothing to do: no valid targets found"
 
@@ -45,7 +45,7 @@ cat > "$VALID_TARGETS" <<'EOF'
 example.com user /srv/data data 22 - reconnect
 EOF
 
-ok_output="$("$SCRIPT" --dry-run --config "$CONFIG_FILE" --targets "$VALID_TARGETS" 2>&1 || true)"
+ok_output="$(bash "$SCRIPT" --dry-run --config "$CONFIG_FILE" --targets "$VALID_TARGETS" 2>&1 || true)"
 assert_not_contains "$ok_output" "expected exactly 7 fields"
 assert_contains "$ok_output" "DRY Mount user@example.com:/srv/data ->"
 

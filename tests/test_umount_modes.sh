@@ -61,7 +61,7 @@ other.example.com user /srv/b $TMP_DIR/m2 22 - reconnect
 EOF
 
 run_cmd() {
-  PATH="$FAKE_BIN:$PATH" "$SCRIPT" "$@" --config "$CONFIG_FILE" --targets "$TARGETS_FILE" 2>&1 || true
+  PATH="$FAKE_BIN:$PATH" bash "$SCRIPT" "$@" --config "$CONFIG_FILE" --targets "$TARGETS_FILE" 2>&1 || true
 }
 
 out="$(run_cmd --dry-run --umount-all)"

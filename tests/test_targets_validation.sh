@@ -33,7 +33,7 @@ assert_not_contains() {
 
 run_dry() {
   local targets_file="$1"
-  "$SCRIPT" --dry-run --config "$CONFIG_FILE" --targets "$targets_file" 2>&1 || true
+  bash "$SCRIPT" --dry-run --config "$CONFIG_FILE" --targets "$targets_file" 2>&1 || true
 }
 
 case_file="$TMP_DIR/case-too-few.conf"
