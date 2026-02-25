@@ -26,3 +26,6 @@ flymount
 # Environment files
 .env
 .env.*
+
+# Local session notes
+chat-session.local.md

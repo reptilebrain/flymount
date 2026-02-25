@@ -24,6 +24,8 @@ shellcheck flymount.sh install.sh uninstall.sh \
   tests/test_install.sh \
   tests/test_uninstall.sh \
   tests/test_umount_modes.sh \
+  tests/test_exit_codes.sh \
+  tests/test_logging_modes.sh \
   tests/test_real_target.sh
 
 tests/test_parser.sh
@@ -31,6 +33,8 @@ tests/test_targets_validation.sh
 tests/test_install.sh
 tests/test_uninstall.sh
 tests/test_umount_modes.sh
+tests/test_exit_codes.sh
+tests/test_logging_modes.sh
 ```
 
 ## Branch and PR
@@ -51,4 +55,3 @@ tests/test_umount_modes.sh
 ## Release notes
 
 - Add/update release note drafts in `release-notes/` when behavior changes.
-

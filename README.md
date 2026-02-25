@@ -115,7 +115,20 @@ flymount --umount
 flymount --umount-all
 flymount --umount-select "1 2"
 flymount --umount-select "/home/user/mnt/web,/home/user/mnt/logs"
+flymount --verbose
+flymount --verbose --log-file /tmp/flymount-debug.log
 ```
+
+### Exit codes
+
+- `0` success / no-op
+- `1` one or more operational failures
+
+### Logging
+
+- Normal user output is concise.
+- Debug output is enabled with `--verbose` or `FLYMOUNT_DEBUG=1`.
+- Debug can be redirected to file with `--log-file PATH` or `FLYMOUNT_LOG_FILE=PATH`.
 
 ## Safety model (important)
 

@@ -8,7 +8,7 @@
 
 set -uo pipefail
 
-VERSION="1.0.0"
+VERSION="1.1.3"
 
 # -------------------------
 # Colors (disable if not a TTY)
@@ -37,6 +37,13 @@ UMOUNT=0
 STATUS=0
 UMOUNT_ALL=0
 UMOUNT_SELECTION=""
+DEBUG="${FLYMOUNT_DEBUG:-0}"
+LOG_FILE="${FLYMOUNT_LOG_FILE:-}"
+
+FAIL_COUNT=0
+SUCCESS_COUNT=0
+INVALID_TARGET_COUNT=0
+VALID_TARGET_COUNT=0
 
 # "Real config" defaults (overridable by config file and/or env)
 CONNECT_TIMEOUT="${CONNECT_TIMEOUT:-5}"
@@ -68,6 +75,16 @@ info() {
   printf "%bInfo:%b %s\n" "$CYAN" "$NC" "$1"
 }
 
+debug() {
+  [[ "$DEBUG" -eq 1 ]] || return 0
+  local msg="Debug: $1"
+  if [[ -n "$LOG_FILE" ]]; then
+    printf "%s\n" "$msg" >> "$LOG_FILE"
+  else
+    printf "%s\n" "$msg" >&2
+  fi
+}
+
 show_help() {
   cat <<EOF
 flymount v$VERSION - mount multiple SSHFS targets safely
@@ -83,12 +100,16 @@ Options:
   --umount, -u      Interactive unmount (shows only currently mounted targets)
   --umount-all      Non-interactive: unmount all currently mounted planned targets
   --umount-select   Non-interactive: unmount selected targets by index/path (comma or space separated)
+  --verbose         Enable debug output (or set FLYMOUNT_DEBUG=1)
+  --log-file <path> Write debug output to file (or set FLYMOUNT_LOG_FILE)
   --help, -h        Show this help
   --version, -v     Show version
 
 Environment overrides:
   FLYMOUNT_TARGETS=...       Targets list path override
   FLYMOUNT_CONFIG=...        Config file path override
+  FLYMOUNT_DEBUG=1           Enable debug output
+  FLYMOUNT_LOG_FILE=...      Debug log file path
 
   BASE_DIR=...               Base directory for relative mount names (default: \$HOME/mnt)
   SSH_STRICT_HOSTKEY=...     yes | accept-new | no  (default: yes)
@@ -125,6 +146,8 @@ Examples:
   ./flymount.sh --umount-all
   ./flymount.sh --umount-select "1 2"
   ./flymount.sh --umount-select "/home/user/mnt/web,/home/user/mnt/logs"
+  ./flymount.sh --verbose
+  ./flymount.sh --verbose --log-file /tmp/flymount-debug.log
   ./flymount.sh --targets ./targets.conf
   ./flymount.sh --config  ./flymount.conf
   BASE_DIR="/home/user/mnt" ./flymount.sh
@@ -156,6 +179,13 @@ while (($#)); do
       [[ -n "${1:-}" ]] || die "--umount-select requires a value"
       UMOUNT=1
       UMOUNT_SELECTION="$1"
+      shift
+      ;;
+    --verbose) DEBUG=1; shift ;;
+    --log-file)
+      shift || die "--log-file requires a path"
+      [[ -n "${1:-}" ]] || die "--log-file requires a path"
+      LOG_FILE="$1"
       shift
       ;;
     --status|-s)  STATUS=1; shift ;;
@@ -560,6 +590,8 @@ build_plan() {
   PLAN_PORT=()
   PLAN_KEYFILE=()
   PLAN_OPTS=()
+  INVALID_TARGET_COUNT=0
+  VALID_TARGET_COUNT=0
 
   declare -A used_local_paths=()
   # shellcheck disable=SC2034
@@ -580,6 +612,7 @@ build_plan() {
       printf "%bTargets error:%b malformed line %d (expected exactly 7 fields, got %d)\n" \
         "$RED" "$NC" "$line_no" "${#fields[@]}"
       printf "Line: %s\n" "$line"
+      ((INVALID_TARGET_COUNT++))
       continue
     fi
 
@@ -591,7 +624,10 @@ build_plan() {
     local keyfile="${fields[5]}"
     local opts="${fields[6]}"
 
-    validate_target_fields "$host" "$user" "$remote_path" "$local_spec" "$port" "$keyfile" "$opts" || continue
+    if ! validate_target_fields "$host" "$user" "$remote_path" "$local_spec" "$port" "$keyfile" "$opts"; then
+      ((INVALID_TARGET_COUNT++))
+      continue
+    fi
 
     local remote="${user}@${host}:${remote_path}"
 
@@ -643,7 +679,10 @@ build_plan() {
     PLAN_PORT+=("$port")
     PLAN_KEYFILE+=("${keyfile:-}")
     PLAN_OPTS+=("${opts:-}")
+    ((VALID_TARGET_COUNT++))
   done < "$TARGETS_FILE"
+
+  debug "Plan build result: valid=$VALID_TARGET_COUNT invalid=$INVALID_TARGET_COUNT"
 }
 
 # -------------------------
@@ -657,13 +696,15 @@ process_target() {
   local port="$5"
   local keyfile="$6"
   local per_target_opts="$7"
+  local created_local_path=0
+  local local_path_existed=0
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
     printf "%bDRY%b Mount %s -> %s\n" "$YELLOW" "$NC" "$remote" "$local_path"
 
     if ! check_fuse_available; then
       printf "%bDRY note:%b mount would fail due to missing FUSE access.\n" "$YELLOW" "$NC"
-      return
+      return 0
     fi
 
     if ! check_local_path_creatable_no_mkdir "$local_path"; then
@@ -675,33 +716,41 @@ process_target() {
       printf "%bDRY note:%b SSH reachability test failed for %s@%s:%s\n" "$YELLOW" "$NC" "$user" "$host" "$port"
     fi
 
-    return
+    return 0
   fi
 
   if mountpoint -q "$local_path"; then
     printf "Mount %s -> %s %bSKIP%b (already mounted)\n" "$remote" "$local_path" "$YELLOW" "$NC"
-    return
+    return 0
   fi
 
   if ! check_fuse_available; then
-    return
+    ((FAIL_COUNT++))
+    return 1
   fi
 
   # Check SSH FIRST (prevents creating local dirs if SSH will fail)
   if ! ssh_reachable "$user" "$host" "$port" "$keyfile"; then
     printf "%bSSH error:%b cannot reach %s@%s on port %s\n" "$RED" "$NC" "$user" "$host" "$port"
     printf "Tip: verify SSH works: ssh -p %s %s@%s\n" "$port" "$user" "$host"
-    return
+    ((FAIL_COUNT++))
+    return 1
   fi
 
   if ! check_local_path_creatable_no_mkdir "$local_path"; then
-    return
+    ((FAIL_COUNT++))
+    return 1
+  fi
+
+  if [[ -d "$local_path" ]]; then
+    local_path_existed=1
   fi
 
   local tmp=""
   if ! tmp="$(mktemp)"; then
     printf "%bInternal error:%b failed to create temporary file\n" "$RED" "$NC"
-    return
+    ((FAIL_COUNT++))
+    return 1
   fi
 
   if ! mkdir -p "$local_path" 2> "$tmp"; then
@@ -711,9 +760,13 @@ process_target() {
     printf "%bLocal path error:%b cannot create '%s'\n" "$RED" "$NC" "$local_path"
     [[ -n "$err" ]] && printf "Reason: %s\n" "$err"
     printf "Tip: choose a writable path (e.g. under '%s') or create it with proper permissions.\n" "$BASE_DIR"
-    return
+    ((FAIL_COUNT++))
+    return 1
   fi
   rm -f "$tmp" >/dev/null 2>&1 || true
+  if [[ "$local_path_existed" -eq 0 ]]; then
+    created_local_path=1
+  fi
 
   # Merge global + per-target sshfs -o options
   local merged_opts=""
@@ -725,10 +778,21 @@ process_target() {
       ${merged_opts:+-o "$merged_opts"} \
       "$remote" "$local_path" 2>&1)"; then
     printf "Mount %s -> %s %bOK%b\n" "$remote" "$local_path" "$GREEN" "$NC"
+    ((SUCCESS_COUNT++))
+    return 0
   else
     printf "Mount %s -> %s %bFAILED%b\n" "$remote" "$local_path" "$RED" "$NC"
     [[ -n "$out" ]] && printf "Reason: %s\n" "$out"
     printf "Tip: check remote path exists and permissions allow access.\n"
+    if [[ "$created_local_path" -eq 1 ]] && [[ -d "$local_path" ]]; then
+      if rmdir "$local_path" >/dev/null 2>&1; then
+        debug "Removed empty mount dir after failed mount: $local_path"
+      else
+        debug "Could not remove mount dir after failed mount: $local_path"
+      fi
+    fi
+    ((FAIL_COUNT++))
+    return 1
   fi
 }
 
@@ -767,7 +831,7 @@ interactive_umount_from_plan() {
 
   if [[ "${#mounts[@]}" -eq 0 ]]; then
     printf "%bNo active mounts found.%b Nothing to unmount.\n" "$YELLOW" "$NC"
-    return
+    return 0
   fi
 
   local selection=""
@@ -783,7 +847,7 @@ interactive_umount_from_plan() {
 
     if [[ -z "${selection:-}" ]]; then
       printf "%bNo selection entered.%b Nothing unmounted.\n" "$YELLOW" "$NC"
-      return
+      return 1
     fi
 
     if [[ "$selection" == "a" ]]; then
@@ -836,10 +900,13 @@ interactive_umount_from_plan() {
       local out=""
       if out="$("$FUSERMOUNT_BIN" -u "$target" 2>&1)"; then
         printf "Unmount %s %bOK%b (remote files no longer visible)\n" "$target" "$GREEN" "$NC"
+        ((SUCCESS_COUNT++))
       else
         printf "Unmount %s %bFAILED%b\n" "$target" "$RED" "$NC"
         [[ -n "$out" ]] && printf "Reason: %s\n" "$out"
         printf "Tip: close shells using the mount, or try: %s -uz '%s'\n" "$FUSERMOUNT_BIN" "$target"
+        ((FAIL_COUNT++))
+        return 1
       fi
     fi
   done
@@ -850,12 +917,13 @@ interactive_umount_from_plan() {
     else
       printf "%bNo valid selection.%b Nothing unmounted.\n" "$YELLOW" "$NC"
     fi
-    return
+    return 1
   fi
 
   if [[ "$invalid_any" -eq 1 ]]; then
     printf "%bNote:%b some selections were invalid and were ignored.\n" "$YELLOW" "$NC"
   fi
+  return 0
 }
 
 # -------------------------
@@ -873,6 +941,10 @@ validate_mode_flags() {
 
   if [[ "$UMOUNT_ALL" -eq 1 && -n "$UMOUNT_SELECTION" ]]; then
     die "--umount-all and --umount-select cannot be used together"
+  fi
+
+  if [[ "$DEBUG" != "0" && "$DEBUG" != "1" ]]; then
+    die "FLYMOUNT_DEBUG/--verbose expects 0 or 1"
   fi
 }
 
@@ -892,6 +964,13 @@ main() {
   validate_mode_flags
   detect_platform
   check_prereqs
+
+  if [[ -n "$LOG_FILE" ]]; then
+    if ! touch "$LOG_FILE" 2>/dev/null; then
+      die "Cannot write log file: $LOG_FILE"
+    fi
+    debug "Debug logging enabled. File: $LOG_FILE"
+  fi
 
   # Load config file (optional)
   load_config_file "$CONFIG_FILE"
@@ -925,7 +1004,12 @@ main() {
   build_plan
 
   if [[ "${#PLAN_REMOTE[@]}" -eq 0 ]]; then
-    printf "%bNothing to do:%b no valid targets found in %s\n" "$YELLOW" "$NC" "$TARGETS_FILE"
+    if [[ "$INVALID_TARGET_COUNT" -gt 0 ]]; then
+      printf "%bNothing to do:%b no valid targets found in %s (invalid targets: %d)\n" \
+        "$RED" "$NC" "$TARGETS_FILE" "$INVALID_TARGET_COUNT"
+      exit 1
+    fi
+    printf "%bNothing to do:%b no targets found in %s\n" "$YELLOW" "$NC" "$TARGETS_FILE"
     exit 0
   fi
 
@@ -935,20 +1019,25 @@ main() {
   fi
 
   if [[ "$UMOUNT" -eq 1 ]]; then
-    interactive_umount_from_plan
+    if ! interactive_umount_from_plan; then
+      exit 1
+    fi
     exit 0
   fi
 
   for i in "${!PLAN_REMOTE[@]}"; do
-    process_target \
+    if ! process_target \
       "${PLAN_REMOTE[$i]}" \
       "${PLAN_LOCAL_PATH[$i]}" \
       "${PLAN_HOST[$i]}" \
       "${PLAN_USER[$i]}" \
       "${PLAN_PORT[$i]}" \
       "${PLAN_KEYFILE[$i]}" \
-      "${PLAN_OPTS[$i]}"
+      "${PLAN_OPTS[$i]}"; then
+      exit 1
+    fi
   done
+  exit 0
 }
 
 main "$@"
