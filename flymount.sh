@@ -14,12 +14,11 @@ VERSION="1.1.3"
 # Colors (disable if not a TTY)
 # -------------------------
 if [[ ! -t 1 ]]; then
-  RED='' GREEN='' YELLOW='' CYAN='' NC=''
+  RED='' GREEN='' YELLOW='' NC=''
 else
   RED='\033[0;31m'
   GREEN='\033[0;32m'
   YELLOW='\033[1;33m'
-  CYAN='\033[0;36m'
   NC='\033[0m'
 fi
 
@@ -69,10 +68,6 @@ die() {
 
 warn() {
   printf "%bWarning:%b %s\n" "$YELLOW" "$NC" "$1" >&2
-}
-
-info() {
-  printf "%bInfo:%b %s\n" "$CYAN" "$NC" "$1"
 }
 
 debug() {
