@@ -433,7 +433,12 @@ for option in StrictHostKeyChecking=no stricthostkeychecking=no STRICTHOSTKEYCHE
   ssh_command=/bin/false SSH_COMMAND=/bin/false BatchMode \
   port=2222 Port=2222 PORT=2222 \
   IdentityFile=/other/key identityfile=/other/key IDENTITYFILE=/other/key \
-  IdentitiesOnly=yes identitiesonly=no IDENTITIESONLY=yes; do
+  IdentitiesOnly=yes identitiesonly=no IDENTITIESONLY=yes \
+  directport=1234 DIRECTPORT=1234 vsock=1:1234 VSOCK=1:1234 passive PASSIVE \
+  Hostname=elsewhere ProxyCommand=/bin/false ProxyJump=bastion \
+  hostname=elsewhere proxycommand=/bin/false proxyjump=bastion \
+  UserKnownHostsFile=/dev/null IdentityAgent=/tmp/agent sftp_server=/bin/false \
+  fsname=other subtype=other future_unknown_option=yes; do
   for origin in global target; do
     reset_case
     if [[ "$origin" == global ]]; then
@@ -444,7 +449,7 @@ for option in StrictHostKeyChecking=no stricthostkeychecking=no STRICTHOSTKEYCHE
     for mode in mount dry; do
       if [[ "$mode" == dry ]]; then run_cli --dry-run; else run_cli; fi
       rc_is 1
-      contains 'is managed by flymount'
+      contains 'unsupported sshfs option'
       [[ ! -s "$CALL_LOG" ]] || fail 'reserved option allowed SSH/SSHFS calls'
     done
   done
@@ -461,5 +466,48 @@ rc_is 0
 logged "ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=yes -p 2222 -i $key user@first.example exit"
 logged "sshfs -p 2222 -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=yes -o IdentityFile=$key user@first.example:/one"
 not_logged 'IdentitiesOnly='
+
+# Every supported family is accepted globally and per-target.
+for options in \
+  reconnect,sshfs_sync,no_readahead,sync_readdir,disable_hardlink \
+  follow_symlinks,transform_symlinks,direct_io,kernel_cache,auto_cache,noauto_cache \
+  allow_other,default_permissions,ro,rw \
+  dir_cache=yes,Compression=no,ServerAliveInterval=15,ServerAliveCountMax=3 \
+  compression=yes,serveraliveinterval=0,SERVERALIVECOUNTMAX=2 \
+  dcache_max_size=100,dcache_timeout=2,dcache_stat_timeout=3,dcache_link_timeout=4,dcache_dir_timeout=5 \
+  dcache_clean_interval=6,dcache_min_clean_interval=7,uid=1000,gid=1000,umask=0022 \
+  entry_timeout=0.5,attr_timeout=1,negative_timeout=2.25,ac_attr_timeout=3,idmap=user \
+  dir_cache=no,idmap=none; do
+  for origin in global target; do
+    reset_case
+    if [[ "$origin" == global ]]; then
+      printf 'DEFAULT_SSHFS_OPTS=%s\n' "$options" >> "$FLYMOUNT_CONFIG"
+    else
+      printf 'first.example user /one one 22 - %s\n' "$options" > "$FLYMOUNT_TARGETS"
+    fi
+    run_cli
+    rc_is 0
+    logged "-o $options"
+  done
+done
+
+# Validate values as well as names, including delimiter/escape tricks.
+for option in reconnect=yes dir_cache dir_cache=maybe idmap=file uid=abc \
+  entry_timeout=-1 attr_timeout=1.2.3 umask=888 Compression=maybe \
+  ServerAliveInterval=15=ProxyJump=bastion 'reconnect\,directport=1234' \
+  'uid=1000\,ProxyJump=bastion'; do
+  for origin in global target; do
+    reset_case
+    if [[ "$origin" == global ]]; then
+      printf 'DEFAULT_SSHFS_OPTS=%s\n' "$option" >> "$FLYMOUNT_CONFIG"
+    else
+      printf 'third.example user /three three 22 - %s\n' "$option" >> "$FLYMOUNT_TARGETS"
+    fi
+    run_cli
+    rc_is 1
+    contains 'Options error:'
+    [[ ! -s "$CALL_LOG" ]] || fail 'invalid option value allowed connection'
+  done
+done
 
 printf 'Audit regression tests passed.\n'

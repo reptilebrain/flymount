@@ -20,3 +20,5 @@ CONNECT_TIMEOUT="5"
 # Example:
 # DEFAULT_SSHFS_OPTS="reconnect,ServerAliveInterval=15,ServerAliveCountMax=3"
 DEFAULT_SSHFS_OPTS=""
+# sshfs_options uses the README allowlist (mount behavior only).
+# Configure SSH routing/authentication in target fields or ~/.ssh/config.

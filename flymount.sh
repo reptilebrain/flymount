@@ -41,7 +41,7 @@ LOG_FILE="${FLYMOUNT_LOG_FILE:-}"
 
 INVALID_TARGET_COUNT=0
 SSH_OPTIONS=()
-SSH_POLICY_ERROR=0
+OPTIONS_ERROR=0
 
 # Remember environment presence before applying defaults/config (empty values count).
 ENV_HAS_CONNECT_TIMEOUT=0
@@ -139,6 +139,7 @@ identity_file:
 sshfs_options:
   -         No extra options
   reconnect,ServerAliveInterval=15  (comma-separated for sshfs -o)
+  Only the README mount-option allowlist is supported; SSH routing/auth uses SSH config.
 
 Examples:
   ./flymount.sh
@@ -377,41 +378,69 @@ merge_sshfs_opts() {
 }
 
 validate_sshfs_opts() {
-  local opts="$1"
-  local origin="$2"
-
+  local opts="$1" origin="$2"
   [[ -z "$opts" || "$opts" == "-" ]] && return 0
 
   if [[ "$opts" =~ [[:space:]] ]]; then
-    printf "%bOptions error:%b %s contains whitespace: '%s'\n" "$RED" "$NC" "$origin" "$opts"
-    printf "Tip: use comma-separated sshfs options without spaces.\n"
+    printf "Options error: %s contains whitespace: '%s'\n" "$origin" "$opts" >&2
+    OPTIONS_ERROR=1
     return 1
   fi
-
   if [[ "$opts" == *",,"* || "$opts" == ","* || "$opts" == *"," ]]; then
-    printf "%bOptions error:%b %s contains malformed comma separators: '%s'\n" "$RED" "$NC" "$origin" "$opts"
+    printf "Options error: %s contains malformed comma separators: '%s'\n" "$origin" "$opts" >&2
+    OPTIONS_ERROR=1
     return 1
   fi
 
-  local part name
+  local part name value kind valid
   local parts=()
-  read -r -a parts <<< "${opts//,/ }"
+  IFS=, read -r -a parts <<< "$opts"
   for part in "${parts[@]}"; do
     name="${part%%=*}"
+    value="${part#*=}"
+    kind=""
+    # Only these SSH options are allowed: liveness and compression, never routing
+    # or authentication. OpenSSH option names are case-insensitive.
     case "${name,,}" in
-      stricthostkeychecking|connecttimeout|batchmode|ssh_command|port|identityfile|identitiesonly)
-        printf "Options error: '%s' is managed by flymount and cannot be overridden in %s\n" "$name" "$origin" >&2
-        SSH_POLICY_ERROR=1
-        return 1
-        ;;
+      serveraliveinterval|serveralivecountmax) kind=integer ;;
+      compression) kind=boolean ;;
     esac
-    if [[ "$part" == -* ]]; then
-      printf "%bOptions error:%b %s contains a '-' prefixed segment: '%s'\n" "$RED" "$NC" "$origin" "$part"
-      printf "Tip: pass bare sshfs option names (without leading '-') in sshfs options.\n"
+    # SSHFS/FUSE option names retain their documented lowercase spelling.
+    case "$name" in
+      reconnect|sshfs_sync|no_readahead|sync_readdir|disable_hardlink|follow_symlinks|transform_symlinks|direct_io|kernel_cache|auto_cache|noauto_cache|allow_other|default_permissions|ro|rw)
+        kind=flag ;;
+      dir_cache) kind=boolean ;;
+      dcache_max_size|dcache_timeout|dcache_stat_timeout|dcache_link_timeout|dcache_dir_timeout|dcache_clean_interval|dcache_min_clean_interval|uid|gid)
+        kind=integer ;;
+      entry_timeout|attr_timeout|negative_timeout|ac_attr_timeout) kind=seconds ;;
+      umask) kind=mask ;;
+      idmap) kind=idmap ;;
+    esac
+    if [[ -z "$kind" ]]; then
+      printf "Options error: unsupported sshfs option '%s' in %s\n" "$name" "$origin" >&2
+      printf "Use supported mount options from README; put SSH routing/authentication in SSH config or target fields.\n" >&2
+      OPTIONS_ERROR=1
+      return 1
+    fi
+
+    valid=0
+    if [[ "$kind" == flag ]]; then
+      [[ "$part" != *=* ]] && valid=1
+    elif [[ "$part" == *=* ]]; then
+      case "$kind" in
+        integer) [[ "$value" =~ ^[0-9]+$ ]] && valid=1 ;;
+        seconds) [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]] && valid=1 ;;
+        boolean) [[ "$value" == yes || "$value" == no ]] && valid=1 ;;
+        mask) [[ "$value" =~ ^[0-7]{1,4}$ ]] && valid=1 ;;
+        idmap) [[ "$value" == none || "$value" == user ]] && valid=1 ;;
+      esac
+    fi
+    if [[ "$valid" == 0 ]]; then
+      printf "Options error: invalid value/form '%s' in %s (expected %s)\n" "$part" "$origin" "$kind" >&2
+      OPTIONS_ERROR=1
       return 1
     fi
   done
-
   return 0
 }
 
@@ -955,8 +984,6 @@ main() {
 
   [[ -r "$TARGETS_FILE" ]] || die "Targets file is not readable: $TARGETS_FILE"
   build_plan
-  # Policy violations invalidate the whole plan before any SSH/SSHFS call.
-  [[ "$SSH_POLICY_ERROR" -eq 0 ]] || return 1
 
   if [[ "${#PLAN_REMOTE[@]}" -eq 0 ]]; then
     if [[ "$INVALID_TARGET_COUNT" -gt 0 ]]; then
@@ -967,6 +994,9 @@ main() {
     printf "%bNothing to do:%b no targets found in %s\n" "$YELLOW" "$NC" "$TARGETS_FILE"
     exit 0
   fi
+
+  # Invalid free-form options invalidate the whole plan before any SSH/SSHFS call.
+  [[ "$OPTIONS_ERROR" -eq 0 ]] || return 1
 
   if [[ "$STATUS" -eq 1 ]]; then
     status_targets_from_plan || return 1

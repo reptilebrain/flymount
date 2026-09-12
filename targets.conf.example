@@ -22,3 +22,6 @@
 
 # Using explicit SSH key
 # 198.51.100.77 ops /var/log logs 22 /home/alice/.ssh/id_ed25519 reconnect
+
+# sshfs_options uses the README allowlist (mount behavior only).
+# Configure SSH routing/authentication in target fields or ~/.ssh/config.

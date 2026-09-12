@@ -87,7 +87,7 @@ Key options:
 - `CONNECT_TIMEOUT` (non-negative integer seconds, default: `5`; `0` uses SSH's system timeout)
 - `DEFAULT_SSHFS_OPTS` (comma-separated sshfs `-o` options)
   - must be comma-separated without spaces
-  - `StrictHostKeyChecking`, `ConnectTimeout`, `BatchMode`, `ssh_command`, `Port`, `IdentityFile` and `IdentitiesOnly` are reserved (case-insensitive) in both global and per-target options
+  - only the supported mount options below are accepted, globally and per target
 
 See `flymount.conf.example`.
 
@@ -119,11 +119,43 @@ Field meanings:
 
 See `targets.conf.example`.
 
-Reserved SSH options invalidate the entire plan before any SSH/SSHFS calls,
-including when valid targets precede the offending line. Use `SSH_STRICT_HOSTKEY`
-and `CONNECT_TIMEOUT` for policy changes, and the dedicated port/identity fields
-for target-specific connection settings. `BatchMode=yes` and the default SSH
-command are managed by flymount.
+Unsupported names or invalid option values invalidate the entire plan before any
+SSH/SSHFS calls, even when valid targets precede the offending line. This is an
+allowlist, not a list of individually forbidden SSH options.
+
+The configuration layers are:
+
+- `targets.conf`: host, user, port, identity file and paths.
+- `flymount.conf`: shared host-key policy and connection timeout.
+- `~/.ssh/config`: advanced routing and authentication used by both connections.
+- `sshfs_options`: the supported filesystem/mount behavior listed below.
+
+Supported options (SSHFS 3 / Linux FUSE):
+
+| Form | Allowed names / values |
+| --- | --- |
+| Flags, without `=` | `reconnect`, `sshfs_sync`, `no_readahead`, `sync_readdir`, `disable_hardlink`, `follow_symlinks`, `transform_symlinks`, `direct_io`, `kernel_cache`, `auto_cache`, `noauto_cache`, `allow_other`, `default_permissions`, `ro`, `rw` |
+| `name=yes` or `name=no` | `dir_cache`, `Compression` |
+| `name=N`, non-negative integer | `ServerAliveInterval`, `ServerAliveCountMax`, `dcache_max_size`, `dcache_timeout`, `dcache_stat_timeout`, `dcache_link_timeout`, `dcache_dir_timeout`, `dcache_clean_interval`, `dcache_min_clean_interval`, `uid`, `gid` |
+| `name=N`, non-negative integer or decimal seconds | `entry_timeout`, `attr_timeout`, `negative_timeout`, `ac_attr_timeout` |
+| Octal mask, 1–4 digits | `umask`, e.g. `umask=0022` |
+| Identity mapping | `idmap=none` or `idmap=user` |
+
+Only the SSH option names `Compression`, `ServerAliveInterval` and
+`ServerAliveCountMax` are case-insensitive. Other names use the lowercase spelling
+shown above. Values are not shell-escaped; commas always separate options.
+SSHFS/FUSE still enforce platform support, numeric limits and permissions.
+The SSH exceptions affect compression/liveness, not routing or authentication.
+
+Options such as `directport`, `vsock`, `passive`, `Hostname`, `ProxyCommand`,
+`ProxyJump`, `ssh_command`, `Port`, `IdentityFile`, `IdentitiesOnly`, `fsname` and
+`subtype` are consequently rejected. Configure SSH routing/authentication in a
+Host entry rather than passing it as a mount-only option. Legacy/custom options
+outside this list are no longer accepted.
+
+The supported subset is based on the [SSHFS manual](https://github.com/libfuse/sshfs/blob/master/sshfs.rst)
+and the Linux `mount.fuse`/`mount.fuse3` manual. It deliberately does not expose
+every option supported by those tools.
 
 An explicit `identity_file` is supplied to both preflight and SSHFS; it does not
 mean that only this key may be used. Normal OpenSSH config and agent identities
@@ -174,9 +206,8 @@ shell wildcards.
 Status verifies both filesystem type (`fuse.sshfs`) and the exact configured
 `user@host:remote_path` source using `findmnt`. A different or unverifiable source
 is reported as `CONFLICT`, with exit status `1`. Mount and unmount operations
-also refuse conflicting mountpoints. Custom `fsname`/`subtype` options or an
-externally mounted source with a different spelling may therefore require manual
-inspection and unmounting.
+also refuse conflicting mountpoints. Externally created mounts with a custom `fsname`/`subtype` or a differently
+spelled source may therefore require manual inspection and unmounting.
 
 Linux dependencies include `findmnt` (util-linux) and `realpath` (coreutils).
 
