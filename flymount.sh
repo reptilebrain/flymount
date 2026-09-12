@@ -399,7 +399,7 @@ validate_sshfs_opts() {
   for part in "${parts[@]}"; do
     name="${part%%=*}"
     case "${name,,}" in
-      stricthostkeychecking|connecttimeout|batchmode|ssh_command)
+      stricthostkeychecking|connecttimeout|batchmode|ssh_command|port|identityfile|identitiesonly)
         printf "Options error: '%s' is managed by flymount and cannot be overridden in %s\n" "$name" "$origin" >&2
         SSH_POLICY_ERROR=1
         return 1

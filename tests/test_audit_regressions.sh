@@ -428,7 +428,12 @@ rc_is 0
 contains 'flymount v1.1.4'
 
 # Reserved options invalidate the entire plan, including earlier valid targets.
-for option in StrictHostKeyChecking=no stricthostkeychecking=no STRICTHOSTKEYCHECKING=no BatchMode=no bAtChMoDe=no ConnectTimeout=999 connecttimeout=999 ssh_command=/bin/false SSH_COMMAND=/bin/false BatchMode; do
+for option in StrictHostKeyChecking=no stricthostkeychecking=no STRICTHOSTKEYCHECKING=no \
+  BatchMode=no bAtChMoDe=no ConnectTimeout=999 connecttimeout=999 \
+  ssh_command=/bin/false SSH_COMMAND=/bin/false BatchMode \
+  port=2222 Port=2222 PORT=2222 \
+  IdentityFile=/other/key identityfile=/other/key IDENTITYFILE=/other/key \
+  IdentitiesOnly=yes identitiesonly=no IDENTITIESONLY=yes; do
   for origin in global target; do
     reset_case
     if [[ "$origin" == global ]]; then
@@ -444,5 +449,17 @@ for option in StrictHostKeyChecking=no stricthostkeychecking=no STRICTHOSTKEYCHE
     done
   done
 done
+
+# An explicit key and non-default port go to both real command builders.
+# Keep normal agent/config behavior; do not silently impose IdentitiesOnly=yes.
+reset_case
+key="$TMP_DIR/explicit-key"
+printf 'test key\n' > "$key"
+printf 'first.example user /one one 2222 %s -\n' "$key" > "$FLYMOUNT_TARGETS"
+run_cli
+rc_is 0
+logged "ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=yes -p 2222 -i $key user@first.example exit"
+logged "sshfs -p 2222 -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=yes -o IdentityFile=$key user@first.example:/one"
+not_logged 'IdentitiesOnly='
 
 printf 'Audit regression tests passed.\n'

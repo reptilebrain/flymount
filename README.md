@@ -87,7 +87,7 @@ Key options:
 - `CONNECT_TIMEOUT` (non-negative integer seconds, default: `5`; `0` uses SSH's system timeout)
 - `DEFAULT_SSHFS_OPTS` (comma-separated sshfs `-o` options)
   - must be comma-separated without spaces
-  - `StrictHostKeyChecking`, `ConnectTimeout`, `BatchMode` and `ssh_command` are reserved (case-insensitive) in both global and per-target options
+  - `StrictHostKeyChecking`, `ConnectTimeout`, `BatchMode`, `ssh_command`, `Port`, `IdentityFile` and `IdentitiesOnly` are reserved (case-insensitive) in both global and per-target options
 
 See `flymount.conf.example`.
 
@@ -121,8 +121,15 @@ See `targets.conf.example`.
 
 Reserved SSH options invalidate the entire plan before any SSH/SSHFS calls,
 including when valid targets precede the offending line. Use `SSH_STRICT_HOSTKEY`
-and `CONNECT_TIMEOUT` for policy changes; `BatchMode=yes` and the default SSH
+and `CONNECT_TIMEOUT` for policy changes, and the dedicated port/identity fields
+for target-specific connection settings. `BatchMode=yes` and the default SSH
 command are managed by flymount.
+
+An explicit `identity_file` is supplied to both preflight and SSHFS; it does not
+mean that only this key may be used. Normal OpenSSH config and agent identities
+remain available according to SSH configuration. Flymount does not automatically
+set `IdentitiesOnly=yes`. To customize identity selection, use an SSH Host entry
+that applies to both connections, rather than free-form SSHFS options.
 
 ## Usage
 
