@@ -8,7 +8,7 @@
 
 set -uo pipefail
 
-VERSION="1.1.3"
+VERSION="1.1.4"
 
 # -------------------------
 # Colors (disable if not a TTY)
@@ -287,7 +287,7 @@ load_config_file() {
     case "$key" in
       BASE_DIR)
         # Only apply config BASE_DIR if env didn't provide BASE_DIR
-        if [[ "$ENV_HAS_BASE_DIR" -eq 0 && -n "$val" ]]; then
+        if [[ "$ENV_HAS_BASE_DIR" -eq 0 ]]; then
           BASE_DIR="$val"
         fi
         ;;
@@ -485,11 +485,6 @@ ssh_reachable() {
 check_local_path_creatable_no_mkdir() {
   local path="$1"
 
-  if [[ -e "$path" && ! -d "$path" ]]; then
-    printf "%bLocal path error:%b '%s' exists but is not a directory\n" "$RED" "$NC" "$path"
-    return 1
-  fi
-
   # If mountpoint exists, it must be writable/searchable for current user
   if [[ -d "$path" ]]; then
     if [[ ! -w "$path" || ! -x "$path" ]]; then
@@ -503,6 +498,10 @@ check_local_path_creatable_no_mkdir() {
 
   local parent="$path"
   while [[ ! -d "$parent" ]]; do
+    if [[ -e "$parent" || -L "$parent" ]]; then
+      printf "%bLocal path error:%b '%s' exists but is not a directory\n" "$RED" "$NC" "$parent"
+      return 1
+    fi
     parent="$(dirname "$parent")"
     [[ "$parent" == "/" ]] && break
   done
@@ -684,13 +683,15 @@ process_target() {
   if [[ "$DRY_RUN" -eq 1 ]]; then
     printf "%bDRY%b Mount %s -> %s\n" "$YELLOW" "$NC" "$remote" "$local_path"
 
+    # Local errors must not be hidden by an unavailable FUSE device.
+    if ! check_local_path_creatable_no_mkdir "$local_path"; then
+      printf "%bDRY note:%b mount would fail due to local path.\n" "$YELLOW" "$NC"
+      return 1
+    fi
+
     if ! check_fuse_available; then
       printf "%bDRY note:%b mount would fail due to missing FUSE access.\n" "$YELLOW" "$NC"
       return 0
-    fi
-
-    if ! check_local_path_creatable_no_mkdir "$local_path"; then
-      printf "%bDRY note:%b mount would fail due to local path.\n" "$YELLOW" "$NC"
     fi
 
     # SSH reachability hint in dry-run (no mkdir, no sshfs)

@@ -16,7 +16,7 @@ not_logged() { ! grep -Fq -- "$1" "$CALL_LOG" || fail "unexpected call: $1"; }
 reset_case() {
   unset BASE_DIR CONNECT_TIMEOUT SSH_STRICT_HOSTKEY DEFAULT_SSHFS_OPTS
   unset FLYMOUNT_DEBUG FLYMOUNT_LOG_FILE
-  MOUNT_STATE=none FAIL_SSH=0 FAIL_MOUNT=0 FAIL_UNMOUNT=0
+  MOUNT_STATE=none FAIL_SSH=0 FAIL_MOUNT=0 FAIL_UNMOUNT=0 FAIL_FUSE=0
   TEST_CWD="$ROOT_DIR"
   : > "$CALL_LOG"
   printf 'BASE_DIR=%s/mnt\n' "$TMP_DIR" > "$FLYMOUNT_CONFIG"
@@ -31,7 +31,7 @@ run_cli() {
     # Read functions plus CLI parsing, but invoke main only after installing mocks.
     # shellcheck disable=SC1090
     source <(sed '$d' "$SCRIPT")
-    check_fuse_available() { return 0; }
+    check_fuse_available() { [[ "$FAIL_FUSE" == 0 ]]; }
     ssh() {
       printf 'ssh %s\n' "$*" >> "$CALL_LOG"
       [[ "$FAIL_SSH" != 1 || "$*" != *first.example* ]]
@@ -297,13 +297,13 @@ run_cli
 rc_is 0
 logged "$TMP_DIR/absolute-one"
 
-# Directory creation failures propagate, without blocking the next target.
+# Local path failures propagate, without blocking the next target.
 reset_case
 printf 'file\n' > "$TMP_DIR/file-parent"
 printf 'first.example user /one %s/file-parent/child 22 - -\nsecond.example user /two two 22 - -\n' "$TMP_DIR" > "$FLYMOUNT_TARGETS"
 run_cli
 rc_is 1
-contains 'cannot create'
+contains "'$TMP_DIR/file-parent' exists but is not a directory"
 logged 'user@second.example'
 
 # Failed mounts remove only newly-created empty mount directories.
@@ -362,5 +362,69 @@ MOUNT_STATE=matching
 run_cli --umount </dev/null
 rc_is 1
 contains 'No selection entered'
+
+# Deterministic local failures fail dry-run, even if FUSE is unavailable.
+for fuse_failure in 0 1; do
+  for spec in blocker blocker/child blocker/deep/child; do
+    reset_case
+    export BASE_DIR="$TMP_DIR/preflight"
+    mkdir -p "$BASE_DIR"
+    printf 'file\n' > "$BASE_DIR/blocker"
+    printf 'first.example user /one %s 22 - -\nsecond.example user /two valid 22 - -\n' "$spec" > "$FLYMOUNT_TARGETS"
+    FAIL_FUSE="$fuse_failure"
+    run_cli --dry-run
+    rc_is 1
+    contains "'$BASE_DIR/blocker' exists but is not a directory"
+    contains "DRY Mount user@second.example:/two -> $BASE_DIR/valid"
+    [[ ! -e "$BASE_DIR/valid" ]] || fail 'dry-run created a directory'
+    not_logged 'sshfs'
+    if [[ "$FAIL_FUSE" == 0 ]]; then logged 'user@second.example'; fi
+  done
+done
+
+# Missing write/search permission fails both existing and new mountpoints.
+for spec in locked locked/child; do
+  reset_case
+  export BASE_DIR="$TMP_DIR/permissions"
+  mkdir -p "$BASE_DIR/locked"
+  chmod 500 "$BASE_DIR/locked"
+  printf 'first.example user /one %s 22 - -\nsecond.example user /two valid 22 - -\n' "$spec" > "$FLYMOUNT_TARGETS"
+  run_cli --dry-run
+  chmod 700 "$BASE_DIR/locked"
+  rc_is 1
+  contains 'Local path error:'
+  contains "DRY Mount user@second.example:/two -> $BASE_DIR/valid"
+  logged 'user@second.example'
+  [[ ! -e "$BASE_DIR/valid" ]] || fail 'dry-run created a directory'
+done
+
+# FUSE/SSH-only failures remain informational in dry-run.
+reset_case
+FAIL_FUSE=1
+run_cli --dry-run
+rc_is 0
+contains 'missing FUSE access'
+reset_case
+FAIL_SSH=1
+run_cli --dry-run
+rc_is 0
+contains 'SSH reachability test failed'
+logged 'user@second.example'
+
+reset_case
+printf 'BASE_DIR=""\n' > "$FLYMOUNT_CONFIG"
+run_cli --dry-run
+rc_is 1
+contains 'BASE_DIR is empty'
+[[ ! -s "$CALL_LOG" ]] || fail 'invalid BASE_DIR invoked external tools'
+export BASE_DIR="$TMP_DIR/env-base"
+run_cli --dry-run
+rc_is 0
+contains "$BASE_DIR/one"
+
+reset_case
+run_cli --version
+rc_is 0
+contains 'flymount v1.1.4'
 
 printf 'Audit regression tests passed.\n'

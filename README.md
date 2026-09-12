@@ -69,6 +69,7 @@ Format: `KEY=VALUE` (unknown keys are ignored).
 
 For all four settings below, precedence is **environment > config file > default**.
 An explicitly empty `DEFAULT_SSHFS_OPTS` clears options from the config file.
+An explicitly empty `BASE_DIR` is an error unless overridden by the environment.
 `BASE_DIR` accepts absolute paths, `~/...`, `$HOME/...`, `${HOME}/...`, and `./...`.
 SSH host-key policy and connection timeout apply to both the SSH preflight and
 SSHFS. Both use `BatchMode=yes` (SSH agent/key authentication without prompts).
@@ -141,9 +142,9 @@ failure. Exit status is `1` if an operation fails, a target is invalid, or an
 unmount selection is invalid; successful operations and empty target files return
 `0`. Mount directories are created only after SSH preflight succeeds, and only
 for targets that actually need mounting. Dry-run reports FUSE/SSH reachability
-issues as hints, but invalid
-configuration, targets, or identity files return `1`. Already mounted, matching
-targets are skipped without checking credentials, including in dry-run mode.
+issues as hints, but invalid configuration, targets, identity files, or local
+mount paths return `1`. Already mounted, matching targets are skipped without
+checking credentials, including in dry-run mode.
 Unreadable config/target files are errors.
 
 Unmount indices are interpreted as decimal strings (leading zeros are accepted).
