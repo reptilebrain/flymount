@@ -39,14 +39,20 @@ UMOUNT_SELECTION=""
 DEBUG="${FLYMOUNT_DEBUG:-0}"
 LOG_FILE="${FLYMOUNT_LOG_FILE:-}"
 
-FAIL_COUNT=0
-SUCCESS_COUNT=0
 INVALID_TARGET_COUNT=0
-VALID_TARGET_COUNT=0
+SSH_OPTIONS=()
+
+# Remember environment presence before applying defaults/config (empty values count).
+ENV_HAS_CONNECT_TIMEOUT=0
+ENV_HAS_SSH_STRICT_HOSTKEY=0
+ENV_HAS_DEFAULT_SSHFS_OPTS=0
+[[ -v CONNECT_TIMEOUT ]] && ENV_HAS_CONNECT_TIMEOUT=1
+[[ -v SSH_STRICT_HOSTKEY ]] && ENV_HAS_SSH_STRICT_HOSTKEY=1
+[[ -v DEFAULT_SSHFS_OPTS ]] && ENV_HAS_DEFAULT_SSHFS_OPTS=1
 
 # "Real config" defaults (overridable by config file and/or env)
-CONNECT_TIMEOUT="${CONNECT_TIMEOUT:-5}"
-SSH_STRICT_HOSTKEY="${SSH_STRICT_HOSTKEY:-yes}"     # yes | accept-new | no
+CONNECT_TIMEOUT="${CONNECT_TIMEOUT-5}"
+SSH_STRICT_HOSTKEY="${SSH_STRICT_HOSTKEY-yes}"     # yes | accept-new | no
 DEFAULT_SSHFS_OPTS="${DEFAULT_SSHFS_OPTS:-}"        # comma-separated list for sshfs -o
 
 # BASE_DIR precedence: env > config > default
@@ -215,10 +221,10 @@ check_prereqs() {
   require ssh
   require sshfs
   require mountpoint
+  require findmnt
+  require realpath
   detect_fusermount || die "Missing dependency: fusermount (or fusermount3)"
-  require mktemp
   require tr
-  require seq
   require dirname
   require pwd
 }
@@ -258,8 +264,9 @@ strip_quotes() {
 }
 
 load_config_file() {
-  local file="$1"
+  local file="$1" line
   [[ -f "$file" ]] || return 0
+  [[ -r "$file" ]] || die "Config file is not readable: $file"
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="$(trim_ws "$line")"
@@ -285,13 +292,13 @@ load_config_file() {
         fi
         ;;
       SSH_STRICT_HOSTKEY)
-        [[ -n "$val" ]] && SSH_STRICT_HOSTKEY="$val"
+        [[ "$ENV_HAS_SSH_STRICT_HOSTKEY" -eq 0 ]] && SSH_STRICT_HOSTKEY="$val"
         ;;
       CONNECT_TIMEOUT)
-        [[ -n "$val" ]] && CONNECT_TIMEOUT="$val"
+        [[ "$ENV_HAS_CONNECT_TIMEOUT" -eq 0 ]] && CONNECT_TIMEOUT="$val"
         ;;
       DEFAULT_SSHFS_OPTS)
-        DEFAULT_SSHFS_OPTS="$val"
+        [[ "$ENV_HAS_DEFAULT_SSHFS_OPTS" -eq 0 ]] && DEFAULT_SSHFS_OPTS="$val"
         ;;
       *)
         ;;
@@ -315,8 +322,8 @@ normalize_base_dir() {
   spec="${spec//\$HOME/$rh}"
   spec="${spec//\$\{HOME\}/$rh}"
 
-  if [[ $spec == ~/* ]]; then
-    spec="$rh/${spec#~/}"
+  if [[ $spec == \~/* ]]; then
+    spec="$rh/${spec#\~/}"
   elif [[ $spec == "~" ]]; then
     spec="$rh"
   elif [[ "$spec" == "./"* ]]; then
@@ -326,8 +333,7 @@ normalize_base_dir() {
     return 1
   fi
 
-  printf "%s" "$spec"
-  return 0
+  realpath -m -- "$spec"
 }
 
 # -------------------------
@@ -348,47 +354,21 @@ basename_from_remote_path() {
 resolve_local_path() {
   local spec="$1"
   if [[ "$spec" == /* ]]; then
-    printf "%s" "$spec"
+    realpath -m -- "$spec"
   else
-    printf "%s/%s" "$BASE_DIR" "$spec"
-  fi
-}
-
-next_available_name() {
-  # base, seen_assoc_name, counter_assoc_name
-  local base="$1"
-  local seen_name="$2"
-  local counter_name="$3"
-
-  declare -n seen="$seen_name"
-  declare -n counter="$counter_name"
-
-  if [[ -z "${seen[$base]+x}" ]]; then
-    seen["$base"]=1
-    counter["$base"]=1
-    NEXT_AVAILABLE_NAME="$base"
-    return 0
-  fi
-
-  local n="${counter[$base]:-1}"
-  while :; do
-    n=$((n+1))
-    local candidate="${base}${n}"
-    if [[ -z "${seen[$candidate]+x}" ]]; then
-      counter["$base"]="$n"
-      seen["$candidate"]=1
-      NEXT_AVAILABLE_NAME="$candidate"
-      return 0
+    local path
+    path="$(realpath -m -- "$BASE_DIR/$spec")" || return 1
+    if [[ "$BASE_DIR" != / && "$path" != "$BASE_DIR/"* ]]; then
+      printf "Targets error: relative local mount escapes BASE_DIR: '%s'\n" "$spec" >&2
+      return 1
     fi
-  done
+    printf "%s" "$path"
+  fi
 }
 
 merge_sshfs_opts() {
   local a="${1:-}"
   local b="${2:-}"
-
-  a="${a#,}"; a="${a%,}"
-  b="${b#,}"; b="${b%,}"
 
   if [[ -z "$a" ]]; then printf "%s" "$b"; return 0; fi
   if [[ -z "$b" ]]; then printf "%s" "$a"; return 0; fi
@@ -416,10 +396,6 @@ validate_sshfs_opts() {
   local parts=()
   read -r -a parts <<< "${opts//,/ }"
   for part in "${parts[@]}"; do
-    if [[ -z "$part" ]]; then
-      printf "%bOptions error:%b %s contains an empty option segment: '%s'\n" "$RED" "$NC" "$origin" "$opts"
-      return 1
-    fi
     if [[ "$part" == -* ]]; then
       printf "%bOptions error:%b %s contains a '-' prefixed segment: '%s'\n" "$RED" "$NC" "$origin" "$part"
       printf "Tip: pass bare sshfs option names (without leading '-') in sshfs options.\n"
@@ -455,16 +431,7 @@ validate_target_fields() {
   local remote_path="$3"
   local local_spec="$4"
   local port="$5"
-  local keyfile="$6"
   local opts="$7"
-
-  if [[ -z "${opts:-}" ]]; then
-    printf "%bTargets error:%b malformed line (need 7 fields): host user remote_path local_mount port identity_file sshfs_options\n" \
-      "$RED" "$NC"
-    printf "Got: host='%s' user='%s' remote='%s' local='%s' port='%s' key='%s' opts='%s'\n" \
-      "${host:-}" "${user:-}" "${remote_path:-}" "${local_spec:-}" "${port:-}" "${keyfile:-}" "${opts:-}"
-    return 1
-  fi
 
   # Classic "field shift" symptom
   if [[ "$user" == */* ]]; then
@@ -473,20 +440,14 @@ validate_target_fields() {
     return 1
   fi
 
-  if ! [[ "$port" =~ ^[0-9]+$ ]]; then
+  if ! [[ "$port" =~ ^[0-9]{1,5}$ ]] || (( 10#$port < 1 || 10#$port > 65535 )); then
     printf "%bTargets error:%b invalid port '%s' for host %s\n" \
       "$RED" "$NC" "$port" "$host"
     return 1
   fi
 
-  if [[ -z "$local_spec" || "$local_spec" =~ [[:space:]] ]]; then
-    printf "%bTargets error:%b invalid local mount spec '%s' for %s:%s\n" \
-      "$RED" "$NC" "$local_spec" "$host" "$remote_path"
-    return 1
-  fi
-
-  if [[ -z "$remote_path" ]]; then
-    printf "%bTargets error:%b remote_path is empty for host %s\n" "$RED" "$NC" "$host"
+  if [[ "$local_spec" != /* && "/$local_spec/" =~ /\.\.?/ ]]; then
+    printf "Targets error: relative local mount cannot contain '.' or '..': '%s'\n" "$local_spec"
     return 1
   fi
 
@@ -513,17 +474,9 @@ ssh_reachable() {
   local port="$3"
   local keyfile="$4"
 
-  local ct="$CONNECT_TIMEOUT"
-  if ! [[ "$ct" =~ ^[0-9]+$ ]]; then
-    ct=5
-  fi
-
-  ssh -o BatchMode=yes \
-      -o "ConnectTimeout=${ct}" \
-      -o "StrictHostKeyChecking=${SSH_STRICT_HOSTKEY}" \
-      -p "$port" \
-      ${keyfile:+-i "$keyfile"} \
-      "$user@$host" exit >/dev/null 2>&1
+  local args=("${SSH_OPTIONS[@]}" -p "$port")
+  [[ -n "$keyfile" ]] && args+=(-i "$keyfile")
+  ssh "${args[@]}" "$user@$host" exit >/dev/null 2>&1
 }
 
 # -------------------------
@@ -571,7 +524,6 @@ PLAN_REMOTE=()
 PLAN_LOCAL_PATH=()
 PLAN_HOST=()
 PLAN_USER=()
-PLAN_REMOTE_PATH=()
 PLAN_PORT=()
 PLAN_KEYFILE=()
 PLAN_OPTS=()
@@ -581,20 +533,18 @@ build_plan() {
   PLAN_LOCAL_PATH=()
   PLAN_HOST=()
   PLAN_USER=()
-  PLAN_REMOTE_PATH=()
   PLAN_PORT=()
   PLAN_KEYFILE=()
   PLAN_OPTS=()
   INVALID_TARGET_COUNT=0
-  VALID_TARGET_COUNT=0
 
   declare -A used_local_paths=()
-  # shellcheck disable=SC2034
-  declare -A auto_seen_names=()
-  # shellcheck disable=SC2034
   declare -A auto_counters=()
 
-  local line=""
+  # Validate once and reserve explicit paths, then assign automatic names.
+  declare -A explicit_local_paths=() resolved_paths=()
+  local valid_lines=()
+  local line="" local_path=""
   local line_no=0
   while IFS= read -r line || [[ -n "$line" ]]; do
     ((line_no++))
@@ -624,38 +574,56 @@ build_plan() {
       continue
     fi
 
+    if [[ "$local_spec" != "-" ]]; then
+      if ! local_path="$(resolve_local_path "$local_spec")"; then
+        ((INVALID_TARGET_COUNT++))
+        continue
+      fi
+      explicit_local_paths["$local_path"]=1
+      resolved_paths["$local_spec"]="$local_path"
+    fi
+    valid_lines+=("$line")
+  done < "$TARGETS_FILE"
+
+  for line in "${valid_lines[@]}"; do
+    read -r host user remote_path local_spec port keyfile opts <<< "$line"
     local remote="${user}@${host}:${remote_path}"
 
     [[ "${keyfile:-}" == "-" ]] && keyfile=""
     [[ "${opts:-}" == "-" ]] && opts=""
 
-    local local_path=""
+    local_path=""
 
     if [[ "$local_spec" == "-" ]]; then
-      local leaf base name
+      local leaf base name n
       leaf="$(basename_from_remote_path "$remote_path")"
       base="$(sanitize_for_dir "$leaf")"
-      if [[ -z "$base" || "$base" == "_" ]]; then
+      if [[ -z "$base" || "$base" == "_" || "$base" == "." || "$base" == ".." ]]; then
         base="$(sanitize_for_dir "$host")"
       fi
-      next_available_name "$base" auto_seen_names auto_counters
-      name="$NEXT_AVAILABLE_NAME"
-      local_path="$(resolve_local_path "$name")"
-
-      if [[ "$remote_path" != /* ]]; then
-        printf "%bTargets note:%b remote_path is relative; remote will be '%s'\n" \
-          "$YELLOW" "$NC" "$remote"
+      n="${auto_counters[$base]:-1}"
+      while :; do
+        name="$base"
+        (( n > 1 )) && name="${base}${n}"
+        local_path="$(resolve_local_path "$name")" || break
+        ((n++))
+        [[ -z "${used_local_paths[$local_path]+x}" && -z "${explicit_local_paths[$local_path]+x}" ]] && break
+      done
+      auto_counters["$base"]="$n"
+      if [[ -z "$local_path" ]]; then
+        ((INVALID_TARGET_COUNT++))
+        continue
       fi
 
       printf "%bTargets note:%b local mount '-' for %s -> using '%s'\n" \
         "$YELLOW" "$NC" "$remote" "$local_path"
     else
-      local_path="$(resolve_local_path "$local_spec")"
+      local_path="${resolved_paths[$local_spec]}"
+    fi
 
-      if [[ "$remote_path" != /* ]]; then
-        printf "%bTargets note:%b remote_path is relative; remote will be '%s'\n" \
-          "$YELLOW" "$NC" "$remote"
-      fi
+    if [[ "$remote_path" != /* ]]; then
+      printf "%bTargets note:%b remote_path is relative; remote will be '%s'\n" \
+        "$YELLOW" "$NC" "$remote"
     fi
 
     if [[ -n "${used_local_paths[$local_path]+x}" ]]; then
@@ -670,14 +638,20 @@ build_plan() {
     PLAN_LOCAL_PATH+=("$local_path")
     PLAN_HOST+=("$host")
     PLAN_USER+=("$user")
-    PLAN_REMOTE_PATH+=("$remote_path")
     PLAN_PORT+=("$port")
     PLAN_KEYFILE+=("${keyfile:-}")
     PLAN_OPTS+=("${opts:-}")
-    ((VALID_TARGET_COUNT++))
-  done < "$TARGETS_FILE"
+  done
 
-  debug "Plan build result: valid=$VALID_TARGET_COUNT invalid=$INVALID_TARGET_COUNT"
+  debug "Plan build result: valid=${#PLAN_REMOTE[@]} invalid=$INVALID_TARGET_COUNT"
+}
+
+# Check both filesystem type and source; a mountpoint alone is not ownership evidence.
+mount_matches_target() {
+  local path="$1" remote="$2" entry fstype source
+  entry="$(findmnt -rn --mountpoint "$path" --output FSTYPE,SOURCE)" || return 1
+  read -r fstype source <<< "$entry"
+  [[ "$fstype" == fuse.sshfs && "$source" == "$remote" ]]
 }
 
 # -------------------------
@@ -691,8 +665,21 @@ process_target() {
   local port="$5"
   local keyfile="$6"
   local per_target_opts="$7"
-  local created_local_path=0
   local local_path_existed=0
+
+  if mountpoint -q "$local_path"; then
+    if ! mount_matches_target "$local_path" "$remote"; then
+      printf "Mount conflict: %s is mounted from a different or unverifiable source (expected %s)\n" "$local_path" "$remote" >&2
+      return 1
+    fi
+    printf "Mount %s -> %s %bSKIP%b (already mounted)\n" "$remote" "$local_path" "$YELLOW" "$NC"
+    return 0
+  fi
+
+  if [[ -n "$keyfile" && ( ! -f "$keyfile" || ! -r "$keyfile" ) ]]; then
+    printf "Identity file error: not a readable regular file: '%s'\n" "$keyfile" >&2
+    return 1
+  fi
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
     printf "%bDRY%b Mount %s -> %s\n" "$YELLOW" "$NC" "$remote" "$local_path"
@@ -714,13 +701,7 @@ process_target() {
     return 0
   fi
 
-  if mountpoint -q "$local_path"; then
-    printf "Mount %s -> %s %bSKIP%b (already mounted)\n" "$remote" "$local_path" "$YELLOW" "$NC"
-    return 0
-  fi
-
   if ! check_fuse_available; then
-    ((FAIL_COUNT++))
     return 1
   fi
 
@@ -728,12 +709,10 @@ process_target() {
   if ! ssh_reachable "$user" "$host" "$port" "$keyfile"; then
     printf "%bSSH error:%b cannot reach %s@%s on port %s\n" "$RED" "$NC" "$user" "$host" "$port"
     printf "Tip: verify SSH works: ssh -p %s %s@%s\n" "$port" "$user" "$host"
-    ((FAIL_COUNT++))
     return 1
   fi
 
   if ! check_local_path_creatable_no_mkdir "$local_path"; then
-    ((FAIL_COUNT++))
     return 1
   fi
 
@@ -741,52 +720,35 @@ process_target() {
     local_path_existed=1
   fi
 
-  local tmp=""
-  if ! tmp="$(mktemp)"; then
-    printf "%bInternal error:%b failed to create temporary file\n" "$RED" "$NC"
-    ((FAIL_COUNT++))
-    return 1
-  fi
-
-  if ! mkdir -p "$local_path" 2> "$tmp"; then
-    local err
-    err="$(cat "$tmp" 2>/dev/null || true)"
-    rm -f "$tmp" >/dev/null 2>&1 || true
+  local out=""
+  if ! out="$(mkdir -p -- "$local_path" 2>&1)"; then
     printf "%bLocal path error:%b cannot create '%s'\n" "$RED" "$NC" "$local_path"
-    [[ -n "$err" ]] && printf "Reason: %s\n" "$err"
+    [[ -n "$out" ]] && printf "Reason: %s\n" "$out"
     printf "Tip: choose a writable path (e.g. under '%s') or create it with proper permissions.\n" "$BASE_DIR"
-    ((FAIL_COUNT++))
     return 1
-  fi
-  rm -f "$tmp" >/dev/null 2>&1 || true
-  if [[ "$local_path_existed" -eq 0 ]]; then
-    created_local_path=1
   fi
 
   # Merge global + per-target sshfs -o options
   local merged_opts=""
   merged_opts="$(merge_sshfs_opts "$DEFAULT_SSHFS_OPTS" "$per_target_opts")"
 
-  local out=""
-  if out="$(sshfs -p "$port" \
-      ${keyfile:+-o IdentityFile="$keyfile"} \
-      ${merged_opts:+-o "$merged_opts"} \
-      "$remote" "$local_path" 2>&1)"; then
+  local args=(-p "$port" "${SSH_OPTIONS[@]}")
+  [[ -n "$keyfile" ]] && args+=(-o "IdentityFile=$keyfile")
+  [[ -n "$merged_opts" ]] && args+=(-o "$merged_opts")
+  if out="$(sshfs "${args[@]}" "$remote" "$local_path" 2>&1)"; then
     printf "Mount %s -> %s %bOK%b\n" "$remote" "$local_path" "$GREEN" "$NC"
-    ((SUCCESS_COUNT++))
     return 0
   else
     printf "Mount %s -> %s %bFAILED%b\n" "$remote" "$local_path" "$RED" "$NC"
     [[ -n "$out" ]] && printf "Reason: %s\n" "$out"
     printf "Tip: check remote path exists and permissions allow access.\n"
-    if [[ "$created_local_path" -eq 1 ]] && [[ -d "$local_path" ]]; then
+    if [[ "$local_path_existed" -eq 0 ]] && [[ -d "$local_path" ]]; then
       if rmdir "$local_path" >/dev/null 2>&1; then
         debug "Removed empty mount dir after failed mount: $local_path"
       else
         debug "Could not remove mount dir after failed mount: $local_path"
       fi
     fi
-    ((FAIL_COUNT++))
     return 1
   fi
 }
@@ -795,28 +757,37 @@ process_target() {
 # Status (from plan)
 # -------------------------
 status_targets_from_plan() {
+  local failed=0 i
   for i in "${!PLAN_REMOTE[@]}"; do
     local remote="${PLAN_REMOTE[$i]}"
     local path="${PLAN_LOCAL_PATH[$i]}"
     if mountpoint -q "$path"; then
+      if ! mount_matches_target "$path" "$remote"; then
+        printf "CONFLICT %s (expected %s)\n" "$path" "$remote"
+        failed=1
+        continue
+      fi
       printf "%bMOUNTED%b %s (%s)\n" "$GREEN" "$NC" "$path" "$remote"
     else
       printf "NOT      %s (%s)\n" "$path" "$remote"
     fi
   done
+  return "$failed"
 }
 
 # -------------------------
 # Interactive umount (from plan)
 # -------------------------
 interactive_umount_from_plan() {
-  local mounts=()
-  local remotes=()
-  local index=1
+  local mounts=() remotes=() picks=()
+  local i path index=1
+  declare -A mount_indices=() picked=()
 
   for i in "${!PLAN_LOCAL_PATH[@]}"; do
-    local path="${PLAN_LOCAL_PATH[$i]}"
+    path="${PLAN_LOCAL_PATH[$i]}"
     if mountpoint -q "$path"; then
+      mount_indices["$index"]="${#mounts[@]}"
+      mount_indices["$path"]="${#mounts[@]}"
       mounts+=("$path")
       remotes+=("${PLAN_REMOTE[$i]}")
       printf "[%d] %s (%s)\n" "$index" "$path" "${PLAN_REMOTE[$i]}"
@@ -829,106 +800,81 @@ interactive_umount_from_plan() {
     return 0
   fi
 
-  local selection=""
+  local selection="$UMOUNT_SELECTION"
   if [[ "$UMOUNT_ALL" -eq 1 ]]; then
-    printf "Selected: all (%d)\n" "${#mounts[@]}"
-    selection="$(seq 1 "${#mounts[@]}")"
-  elif [[ -n "$UMOUNT_SELECTION" ]]; then
-    selection="${UMOUNT_SELECTION//,/ }"
-    printf "Selected: %s\n" "$selection"
-  else
+    selection=a
+  elif [[ -z "$selection" ]]; then
     printf "\nSelect number(s) to unmount (e.g. 1 2), mount path(s), or 'a' for all: "
     read -r selection
-
-    if [[ -z "${selection:-}" ]]; then
+    if [[ -z "$selection" ]]; then
       printf "%bNo selection entered.%b Nothing unmounted.\n" "$YELLOW" "$NC"
       return 1
     fi
-
-    if [[ "$selection" == "a" ]]; then
-      printf "Selected: all (%d)\n" "${#mounts[@]}"
-      selection=$(seq 1 "${#mounts[@]}")
-    else
-      printf "Selected: %s\n" "$selection"
-    fi
   fi
 
-  local did_any=0
-  local invalid_any=0
-  local pick=""
-  local pick_idx=0
-  declare -A picked=()
+  if [[ "$selection" == a ]]; then
+    printf "Selected: all (%d)\n" "${#mounts[@]}"
+    for ((i=1; i<=${#mounts[@]}; i++)); do picks+=("$i"); done
+  elif [[ -n "${mount_indices[$selection]+x}" ]]; then
+    # Preserve an exact path even when BASE_DIR contains spaces or commas.
+    printf "Selected: %s\n" "$selection"
+    picks=("$selection")
+  else
+    selection="${selection//,/ }"
+    selection="${selection//$'\n'/ }"
+    printf "Selected: %s\n" "$selection"
+    # Split delimiters without glob expansion. Indices are looked up as strings,
+    # never evaluated as arithmetic (avoids octal parsing and integer overflow).
+    read -r -a picks <<< "$selection"
+  fi
 
-  for pick in $selection; do
-    pick_idx=0
-    if [[ "$pick" =~ ^[0-9]+$ ]] && (( pick >= 1 && pick <= ${#mounts[@]} )); then
-      pick_idx="$pick"
-    else
-      local found=0
-      local i=0
-      for i in "${!mounts[@]}"; do
-        if [[ "${mounts[$i]}" == "$pick" ]]; then
-          pick_idx=$((i+1))
-          found=1
-          break
-        fi
-      done
-      if [[ "$found" -eq 0 ]]; then
-        invalid_any=1
-        continue
-      fi
+  local failed=0 invalid_any=0 pick idx target remote out
+  for pick in "${picks[@]}"; do
+    if [[ "$pick" =~ ^[0-9]+$ ]]; then
+      pick="${pick#"${pick%%[!0]*}"}"
+      pick="${pick:-0}"
     fi
-
-    if [[ -n "${picked[$pick_idx]+x}" ]]; then
+    if [[ -z "${mount_indices[$pick]+x}" ]]; then
+      invalid_any=1
       continue
     fi
-    picked["$pick_idx"]=1
+    idx="${mount_indices[$pick]}"
+    [[ -n "${picked[$idx]+x}" ]] && continue
+    picked["$idx"]=1
+    target="${mounts[$idx]}"
+    remote="${remotes[$idx]}"
 
-    local idx0=$((pick_idx-1))
-    local target="${mounts[$idx0]}"
-    local r="${remotes[$idx0]}"
-    did_any=1
+    if ! mount_matches_target "$target" "$remote"; then
+      printf "Unmount conflict: %s does not match expected SSHFS source %s; left mounted\n" "$target" "$remote" >&2
+      failed=1
+      continue
+    fi
 
-    if [[ "$DRY_RUN" -eq 1 ]]; then
-      printf "%bDRY%b Unmount %s (%s)\n" "$YELLOW" "$NC" "$target" "$r"
+    if out="$("$FUSERMOUNT_BIN" -u "$target" 2>&1)"; then
+      printf "Unmount %s %bOK%b (remote files no longer visible)\n" "$target" "$GREEN" "$NC"
     else
-      local out=""
-      if out="$("$FUSERMOUNT_BIN" -u "$target" 2>&1)"; then
-        printf "Unmount %s %bOK%b (remote files no longer visible)\n" "$target" "$GREEN" "$NC"
-        ((SUCCESS_COUNT++))
-      else
-        printf "Unmount %s %bFAILED%b\n" "$target" "$RED" "$NC"
-        [[ -n "$out" ]] && printf "Reason: %s\n" "$out"
-        printf "Tip: close shells using the mount, or try: %s -uz '%s'\n" "$FUSERMOUNT_BIN" "$target"
-        ((FAIL_COUNT++))
-        return 1
-      fi
+      printf "Unmount %s %bFAILED%b\n" "$target" "$RED" "$NC"
+      [[ -n "$out" ]] && printf "Reason: %s\n" "$out"
+      printf "Tip: close shells using the mount, or try: %s -uz '%s'\n" "$FUSERMOUNT_BIN" "$target"
+      failed=1
     fi
   done
 
-  if [[ "$did_any" -eq 0 ]]; then
-    if [[ -n "$UMOUNT_SELECTION" ]]; then
-      printf "%bNo valid selection.%b Nothing unmounted. (use index or full mount path)\n" "$YELLOW" "$NC"
-    else
-      printf "%bNo valid selection.%b Nothing unmounted.\n" "$YELLOW" "$NC"
-    fi
+  if [[ "${#picked[@]}" -eq 0 ]]; then
+    printf "%bNo valid selection.%b Nothing unmounted. (use index or full mount path)\n" "$YELLOW" "$NC"
     return 1
   fi
-
   if [[ "$invalid_any" -eq 1 ]]; then
     printf "%bNote:%b some selections were invalid and were ignored.\n" "$YELLOW" "$NC"
   fi
-  return 0
+  (( failed == 0 && invalid_any == 0 ))
 }
 
 # -------------------------
 # CLI mode validation
 # -------------------------
 validate_mode_flags() {
-  local mode_count=0
-  (( DRY_RUN == 1 )) && ((mode_count++))
-  (( STATUS == 1 )) && ((mode_count++))
-  (( UMOUNT == 1 )) && ((mode_count++))
+  local mode_count=$((DRY_RUN + STATUS + UMOUNT))
 
   if (( mode_count > 1 )); then
     die "Choose only one mode: --dry-run, --status, --umount/--umount-all/--umount-select"
@@ -970,23 +916,24 @@ main() {
   # Load config file (optional)
   load_config_file "$CONFIG_FILE"
 
+  case "$SSH_STRICT_HOSTKEY" in
+    yes|accept-new|no) ;;
+    *) die "Invalid SSH_STRICT_HOSTKEY: $SSH_STRICT_HOSTKEY (expected yes, accept-new or no)" ;;
+  esac
+  if ! [[ "$CONNECT_TIMEOUT" =~ ^[0-9]+$ ]]; then
+    die "Invalid CONNECT_TIMEOUT: $CONNECT_TIMEOUT (expected non-negative integer seconds)"
+  fi
+
+  SSH_OPTIONS=(-o BatchMode=yes -o "ConnectTimeout=$CONNECT_TIMEOUT"
+    -o "StrictHostKeyChecking=$SSH_STRICT_HOSTKEY")
+  [[ "$DEFAULT_SSHFS_OPTS" == "-" ]] && DEFAULT_SSHFS_OPTS=""
+
   if ! validate_sshfs_opts "$DEFAULT_SSHFS_OPTS" "DEFAULT_SSHFS_OPTS"; then
     exit 1
   fi
 
   if ! BASE_DIR="$(normalize_base_dir "$BASE_DIR")"; then
     exit 1
-  fi
-
-  # Ensure BASE_DIR exists ONLY when actually mounting (not dry-run/status/umount)
-  if [[ "$DRY_RUN" -eq 0 && "$STATUS" -eq 0 && "$UMOUNT" -eq 0 ]]; then
-    if [[ ! -d "$BASE_DIR" ]]; then
-      if ! mkdir -p "$BASE_DIR" 2>/dev/null; then
-        printf "%bBase dir error:%b cannot create BASE_DIR '%s'\n" "$RED" "$NC" "$BASE_DIR"
-        printf "Tip: set BASE_DIR to a writable absolute path, e.g.: BASE_DIR=\"/home/user/mnt\" ./flymount.sh\n"
-        exit 1
-      fi
-    fi
   fi
 
   if [[ ! -f "$TARGETS_FILE" ]]; then
@@ -996,6 +943,7 @@ main() {
     exit 1
   fi
 
+  [[ -r "$TARGETS_FILE" ]] || die "Targets file is not readable: $TARGETS_FILE"
   build_plan
 
   if [[ "${#PLAN_REMOTE[@]}" -eq 0 ]]; then
@@ -1009,17 +957,18 @@ main() {
   fi
 
   if [[ "$STATUS" -eq 1 ]]; then
-    status_targets_from_plan
-    exit 0
+    status_targets_from_plan || return 1
+    (( INVALID_TARGET_COUNT == 0 ))
+    return $?
   fi
 
   if [[ "$UMOUNT" -eq 1 ]]; then
-    if ! interactive_umount_from_plan; then
-      exit 1
-    fi
-    exit 0
+    interactive_umount_from_plan || return 1
+    (( INVALID_TARGET_COUNT == 0 ))
+    return $?
   fi
 
+  local failed=0 i
   for i in "${!PLAN_REMOTE[@]}"; do
     if ! process_target \
       "${PLAN_REMOTE[$i]}" \
@@ -1029,10 +978,10 @@ main() {
       "${PLAN_PORT[$i]}" \
       "${PLAN_KEYFILE[$i]}" \
       "${PLAN_OPTS[$i]}"; then
-      exit 1
+      failed=1
     fi
   done
-  exit 0
+  (( failed == 0 && INVALID_TARGET_COUNT == 0 ))
 }
 
 main "$@"

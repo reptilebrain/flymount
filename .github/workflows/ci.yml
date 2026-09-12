@@ -30,6 +30,7 @@ jobs:
             tests/test_umount_modes.sh \
             tests/test_exit_codes.sh \
             tests/test_logging_modes.sh \
+            tests/test_audit_regressions.sh \
             tests/test_real_target.sh
 
       - name: Run test suite
@@ -42,3 +43,4 @@ jobs:
           tests/test_umount_modes.sh
           tests/test_exit_codes.sh
           tests/test_logging_modes.sh
+          tests/test_audit_regressions.sh

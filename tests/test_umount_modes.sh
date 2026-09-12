@@ -23,6 +23,16 @@ esac
 EOF
 chmod +x "$FAKE_BIN/mountpoint"
 
+cat > "$FAKE_BIN/findmnt" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"$TMP_DIR/m1"*) printf '%s\n' 'fuse.sshfs user@example.com:/srv/a' ;;
+  *"$TMP_DIR/m2"*) printf '%s\n' 'fuse.sshfs user@other.example.com:/srv/b' ;;
+  *) exit 1 ;;
+esac
+EOF
+chmod +x "$FAKE_BIN/findmnt"
+
 cat > "$FAKE_BIN/fusermount" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail

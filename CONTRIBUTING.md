@@ -26,6 +26,7 @@ shellcheck flymount.sh install.sh uninstall.sh \
   tests/test_umount_modes.sh \
   tests/test_exit_codes.sh \
   tests/test_logging_modes.sh \
+  tests/test_audit_regressions.sh \
   tests/test_real_target.sh
 
 tests/test_parser.sh
@@ -35,6 +36,7 @@ tests/test_uninstall.sh
 tests/test_umount_modes.sh
 tests/test_exit_codes.sh
 tests/test_logging_modes.sh
+tests/test_audit_regressions.sh
 ```
 
 ## Branch and PR

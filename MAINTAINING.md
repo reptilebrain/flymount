@@ -20,6 +20,7 @@ Before tagging a release:
 - [ ] Umount mode tests pass (`tests/test_umount_modes.sh`)
 - [ ] Exit code tests pass (`tests/test_exit_codes.sh`)
 - [ ] Logging mode tests pass (`tests/test_logging_modes.sh`)
+- [ ] Audit regression tests pass (`tests/test_audit_regressions.sh`)
 - [ ] (Optional) Real target smoke test passes (`FLYMOUNT_REAL_TARGET='...' tests/test_real_target.sh`)
 - [ ] Manual test checklist passes
 - [ ] README reviewed
