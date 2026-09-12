@@ -25,3 +25,12 @@ removed. Normal SSH configuration and credentials were not modified.
 
 This validates the local Linux/WSL integration, not remote-network outages or
 behavior on other operating systems.
+
+## Follow-up after reserving SSH options
+
+A second real localhost SSHFS test passed after ssh_command and central policy
+options were prohibited in free-form option lists. This run used no reserved
+options. A PATH-local wrapper selected the isolated SSH client configuration for
+the real ssh executable; SSHFS itself used its default SSH command. Mounting,
+reading, writing, exact-source status and normal unmount all passed. The test
+mount was removed, the temporary server stopped and the generated keys deleted.

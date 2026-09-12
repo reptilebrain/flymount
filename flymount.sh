@@ -41,6 +41,7 @@ LOG_FILE="${FLYMOUNT_LOG_FILE:-}"
 
 INVALID_TARGET_COUNT=0
 SSH_OPTIONS=()
+SSH_POLICY_ERROR=0
 
 # Remember environment presence before applying defaults/config (empty values count).
 ENV_HAS_CONNECT_TIMEOUT=0
@@ -392,10 +393,18 @@ validate_sshfs_opts() {
     return 1
   fi
 
-  local part
+  local part name
   local parts=()
   read -r -a parts <<< "${opts//,/ }"
   for part in "${parts[@]}"; do
+    name="${part%%=*}"
+    case "${name,,}" in
+      stricthostkeychecking|connecttimeout|batchmode|ssh_command)
+        printf "Options error: '%s' is managed by flymount and cannot be overridden in %s\n" "$name" "$origin" >&2
+        SSH_POLICY_ERROR=1
+        return 1
+        ;;
+    esac
     if [[ "$part" == -* ]]; then
       printf "%bOptions error:%b %s contains a '-' prefixed segment: '%s'\n" "$RED" "$NC" "$origin" "$part"
       printf "Tip: pass bare sshfs option names (without leading '-') in sshfs options.\n"
@@ -946,6 +955,8 @@ main() {
 
   [[ -r "$TARGETS_FILE" ]] || die "Targets file is not readable: $TARGETS_FILE"
   build_plan
+  # Policy violations invalidate the whole plan before any SSH/SSHFS call.
+  [[ "$SSH_POLICY_ERROR" -eq 0 ]] || return 1
 
   if [[ "${#PLAN_REMOTE[@]}" -eq 0 ]]; then
     if [[ "$INVALID_TARGET_COUNT" -gt 0 ]]; then

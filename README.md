@@ -39,6 +39,8 @@ chmod +x install.sh
 
 The installer:
 - copies the script to `~/.local/bin/flymount`
+- updates only a regular file with the recognized flymount header; refuses unrelated files, symlinks and special files
+- replaces the binary atomically, preserving any other hard links
 - creates `~/.config/flymount/` if missing
 - does **not** overwrite existing config files
 
@@ -49,7 +51,11 @@ chmod +x uninstall.sh
 ./uninstall.sh
 ```
 
-Uninstall removes only the binary and leaves your config directory untouched.
+Uninstall removes only a regular file with the recognized flymount header and
+leaves your config directory untouched. Both scripts inspect the stable header
+without executing the existing binary. If a path is refused, inspect and move it
+manually before retrying; there is no automatic force override. The header check
+prevents accidental replacement/removal, not deliberate impersonation.
 
 ## Configuration
 
@@ -81,6 +87,7 @@ Key options:
 - `CONNECT_TIMEOUT` (non-negative integer seconds, default: `5`; `0` uses SSH's system timeout)
 - `DEFAULT_SSHFS_OPTS` (comma-separated sshfs `-o` options)
   - must be comma-separated without spaces
+  - `StrictHostKeyChecking`, `ConnectTimeout`, `BatchMode` and `ssh_command` are reserved (case-insensitive) in both global and per-target options
 
 See `flymount.conf.example`.
 
@@ -111,6 +118,11 @@ Field meanings:
   - must be comma-separated without spaces
 
 See `targets.conf.example`.
+
+Reserved SSH options invalidate the entire plan before any SSH/SSHFS calls,
+including when valid targets precede the offending line. Use `SSH_STRICT_HOSTKEY`
+and `CONNECT_TIMEOUT` for policy changes; `BatchMode=yes` and the default SSH
+command are managed by flymount.
 
 ## Usage
 

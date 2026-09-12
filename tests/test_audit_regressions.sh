@@ -427,4 +427,22 @@ run_cli --version
 rc_is 0
 contains 'flymount v1.1.4'
 
+# Reserved options invalidate the entire plan, including earlier valid targets.
+for option in StrictHostKeyChecking=no stricthostkeychecking=no STRICTHOSTKEYCHECKING=no BatchMode=no bAtChMoDe=no ConnectTimeout=999 connecttimeout=999 ssh_command=/bin/false SSH_COMMAND=/bin/false BatchMode; do
+  for origin in global target; do
+    reset_case
+    if [[ "$origin" == global ]]; then
+      printf 'DEFAULT_SSHFS_OPTS=ro,%s\n' "$option" >> "$FLYMOUNT_CONFIG"
+    else
+      printf 'third.example user /three three 22 - reconnect,%s\n' "$option" >> "$FLYMOUNT_TARGETS"
+    fi
+    for mode in mount dry; do
+      if [[ "$mode" == dry ]]; then run_cli --dry-run; else run_cli; fi
+      rc_is 1
+      contains 'is managed by flymount'
+      [[ ! -s "$CALL_LOG" ]] || fail 'reserved option allowed SSH/SSHFS calls'
+    done
+  done
+done
+
 printf 'Audit regression tests passed.\n'

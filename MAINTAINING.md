@@ -21,6 +21,7 @@ Before tagging a release:
 - [ ] Exit code tests pass (`tests/test_exit_codes.sh`)
 - [ ] Logging mode tests pass (`tests/test_logging_modes.sh`)
 - [ ] Audit regression tests pass (`tests/test_audit_regressions.sh`)
+- [ ] Binary safety tests pass (`tests/test_binary_safety.sh`)
 - [ ] (Optional) Real target smoke test passes (`FLYMOUNT_REAL_TARGET='...' tests/test_real_target.sh`)
 - [ ] Manual test checklist passes
 - [ ] README reviewed
