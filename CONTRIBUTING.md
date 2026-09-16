@@ -22,7 +22,7 @@ Run before opening a PR:
 bash tests/run_tests.sh
 ```
 
-This runs `bash -n`, ShellCheck and all ten automated test scripts. CI uses the
+This runs `bash -n`, Python syntax checks, ShellCheck and all ten automated test scripts. CI uses the
 same entry point: `tests.yml` runs `--syntax` and `--tests`, while
 `shellcheck.yml` runs `--shellcheck` as an independent required check.
 Use the runner rather than executing the older test scripts directly: it clears
@@ -41,7 +41,7 @@ collisions, return codes, continued processing after failures, mount-source
 conflicts, logging and install/uninstall file safety. Binary comparisons and a
 dry-run snapshot check file-content preservation; flymount has no import feature.
 
-Tests do not cover real networks, SSH authentication, FUSE mounts, kernel behavior,
+The default tests do not cover real networks, SSH authentication, FUSE mounts, kernel behavior,
 or other platforms. `test_real_target.sh` is syntax/lint checked but deliberately
 excluded from the automated suite because it can access external services. Real
 integration results from earlier work are recorded separately in release notes.
@@ -52,6 +52,14 @@ by that script; SC2016 preserves literal shell text in installation instructions
 regression fixtures.
 No workflow step uses `continue-on-error` or ignores test exit codes.
 
+
+## Optional localhost integration
+
+[Local SSHFS integration](tests/INTEGRATION.md) tests real SSH authentication,
+FUSE mounts and binary file transfers against an ephemeral localhost server.
+Run it explicitly with `python3 tests/test_local_sshfs.py --run`, or start the
+manual **Local SSHFS integration** Actions workflow. It is excluded from the
+standard suite and required PR checks.
 
 ## Branch and PR
 

@@ -11,7 +11,13 @@ esac
 scripts=(flymount.sh install.sh uninstall.sh tests/*.sh)
 if [[ "$mode" == --all || "$mode" == --syntax ]]; then
   for script in "${scripts[@]}"; do bash -n "$script"; done
-  printf 'Bash syntax checks passed.\n'
+  python3 - <<'PY'
+import ast
+from pathlib import Path
+for script in Path('tests').glob('*.py'):
+    ast.parse(script.read_text(), filename=str(script))
+PY
+  printf 'Bash and Python syntax checks passed.\n'
 fi
 if [[ "$mode" == --all || "$mode" == --shellcheck ]]; then
   shellcheck "${scripts[@]}"
