@@ -1,7 +1,7 @@
 # flymount
 
 [![Version](https://img.shields.io/github/v/tag/reptilebrain/flymount?label=version)](https://github.com/reptilebrain/flymount/tags)
-[![CI](https://github.com/reptilebrain/flymount/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/reptilebrain/flymount/actions/workflows/ci.yml)
+[![Tests](https://github.com/reptilebrain/flymount/actions/workflows/tests.yml/badge.svg?branch=main&event=push)](https://github.com/reptilebrain/flymount/actions/workflows/tests.yml)
 [![License](https://img.shields.io/github/license/reptilebrain/flymount)](LICENSE)
 
 Deterministic multi-SSHFS mount helper (Bash).

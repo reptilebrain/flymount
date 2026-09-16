@@ -510,4 +510,23 @@ for option in reconnect=yes dir_cache dir_cache=maybe idmap=file uid=abc \
   done
 done
 
+# Dry-run handles spaces without creating directories or changing file content.
+reset_case
+export BASE_DIR="$TMP_DIR/dry run space"
+mkdir -p "$BASE_DIR/one" "$BASE_DIR/two"
+printf 'preserve bytes\000\377\n' > "$BASE_DIR/one/existing file"
+printf 'second file\n' > "$BASE_DIR/two/existing file"
+cp -a "$BASE_DIR" "$TMP_DIR/dry-before"
+run_cli --dry-run
+rc_is 0
+contains "DRY Mount user@first.example:/one -> $BASE_DIR/one"
+contains "DRY Mount user@second.example:/two -> $BASE_DIR/two"
+diff -r -- "$TMP_DIR/dry-before" "$BASE_DIR" || fail 'dry-run modified existing files'
+not_logged 'sshfs'
+not_logged 'unmount'
+export BASE_DIR="$TMP_DIR/new dry run space"
+run_cli --dry-run
+rc_is 0
+[[ ! -e "$BASE_DIR" ]] || fail 'dry-run created BASE_DIR with spaces'
+
 printf 'Audit regression tests passed.\n'
