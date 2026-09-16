@@ -1,4 +1,4 @@
-name: Tests
+name: ShellCheck
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  tests:
+  shellcheck:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -23,8 +23,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Check Bash syntax
-        run: bash tests/run_tests.sh --syntax
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
 
-      - name: Run isolated tests
-        run: bash tests/run_tests.sh --tests
+      - name: Run ShellCheck
+        run: bash tests/run_tests.sh --shellcheck

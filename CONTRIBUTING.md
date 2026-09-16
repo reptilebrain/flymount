@@ -23,7 +23,8 @@ bash tests/run_tests.sh
 ```
 
 This runs `bash -n`, ShellCheck and all ten automated test scripts. CI uses the
-same entry point in three separate steps (`--syntax`, `--shellcheck`, `--tests`).
+same entry point: `tests.yml` runs `--syntax` and `--tests`, while
+`shellcheck.yml` runs `--shellcheck` as an independent required check.
 Use the runner rather than executing the older test scripts directly: it clears
 the inherited environment, supplies temporary HOME/XDG/TMPDIR directories, and
 replaces SSH, SSHFS, mountpoint, findmnt and fusermount with fail-closed doubles.
