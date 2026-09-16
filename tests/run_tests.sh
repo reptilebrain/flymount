@@ -20,8 +20,19 @@ fi
 
 TEST_ROOT="$(mktemp -d /tmp/flymount-tests.XXXXXXXX)"
 trap 'rm -rf -- "$TEST_ROOT"' EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
+TEST_PID=""
+stop_tests() {
+  local status="$1"
+  trap '' INT TERM
+  if [[ -n "$TEST_PID" ]]; then
+    # Each test has its own process group, including any helper processes.
+    kill -TERM -- "-$TEST_PID" 2>/dev/null || kill -TERM "$TEST_PID" 2>/dev/null || true
+    wait "$TEST_PID" 2>/dev/null || true
+  fi
+  exit "$status"
+}
+trap 'stop_tests 130' INT
+trap 'stop_tests 143' TERM
 mkdir -p "$TEST_ROOT/bin"
 # Fail closed: legacy tests can inspect failure output but cannot connect,
 # mount, inspect real mounts, or unmount. Individual fixtures may override these
@@ -38,15 +49,18 @@ done
 tests=(
   test_parser.sh test_targets_validation.sh test_install.sh test_uninstall.sh
   test_umount_modes.sh test_exit_codes.sh test_logging_modes.sh
-  test_audit_regressions.sh test_binary_safety.sh
+  test_audit_regressions.sh test_binary_safety.sh test_runner_signals.sh
 )
 for test in "${tests[@]}"; do
   fixture="$TEST_ROOT/${test%.sh}"
   mkdir -p "$fixture/home" "$fixture/config" "$fixture/tmp"
   # Do not inherit agent sockets, SSH settings, flymount overrides, shell startup
   # hooks, or the opt-in real-target smoke-test environment variable.
-  env -i HOME="$fixture/home" XDG_CONFIG_HOME="$fixture/config" \
+  setsid env -i HOME="$fixture/home" XDG_CONFIG_HOME="$fixture/config" \
     TMPDIR="$fixture/tmp" LC_ALL=C PATH="$TEST_ROOT/bin:/usr/bin:/bin" \
-    bash "$ROOT_DIR/tests/$test"
+    bash "$ROOT_DIR/tests/$test" &
+  TEST_PID=$!
+  wait "$TEST_PID"
+  TEST_PID=""
 done
 printf 'All %d isolated test scripts passed.\n' "${#tests[@]}"
