@@ -12,45 +12,56 @@ Deterministic multi-SSHFS mount helper (Bash).
 - **Plan-based** (build plan → execute)
 - **Strict targets validation** with clear error messages
 
+## Requirements
+
+Linux with Bash, the OpenSSH client (`ssh`), SSHFS 3, FUSE access (`/dev/fuse`),
+`fusermount` or `fusermount3`, util-linux (`mountpoint`, `findmnt`) and standard
+coreutils (including `realpath`). Run flymount as a normal user. Set up SSH
+key/agent authentication and the server's trusted host key before mounting;
+flymount uses non-interactive SSH with strict host-key checking by default.
+
 ## Quick start
 
 ```bash
-# 1) Install (user-local)
-./install.sh
+# Install without overwriting existing configuration.
+bash install.sh
+export PATH="$HOME/.local/bin:$PATH"
+```
 
-# 2) Copy example configs
-mkdir -p ~/.config/flymount
-cp flymount.conf.example ~/.config/flymount/flymount.conf
-cp targets.conf.example  ~/.config/flymount/targets.conf
+Edit `flymount.conf` and `targets.conf` in
+`${XDG_CONFIG_HOME:-$HOME/.config}/flymount/`. The installer creates example
+configuration only when the files are missing. All example targets are commented
+out: uncomment and adapt a target to your server before continuing. Do not copy
+the example files over an existing configuration.
 
-# 3) Dry-run first
+```bash
+# Check the plan and preflight before mounting.
 flymount --dry-run
-
-# 4) Mount
 flymount
 ```
+
+An unchanged example targets file produces a successful no-op.
 
 ## Installation
 
 ### Install to ~/.local/bin
 
 ```bash
-chmod +x install.sh
-./install.sh
+bash install.sh
 ```
 
 The installer:
+
 - copies the script to `~/.local/bin/flymount`
 - updates only a regular file with the recognized flymount header; refuses unrelated files, symlinks and special files
 - replaces the binary atomically, preserving any other hard links
-- creates `~/.config/flymount/` if missing
+- creates `${XDG_CONFIG_HOME:-$HOME/.config}/flymount/` if missing
 - does **not** overwrite existing config files
 
 ### Uninstall
 
 ```bash
-chmod +x uninstall.sh
-./uninstall.sh
+bash uninstall.sh
 ```
 
 Uninstall removes only a regular file with the recognized flymount header and
@@ -61,7 +72,8 @@ prevents accidental replacement/removal, not deliberate impersonation.
 
 ## Configuration
 
-Config directory (XDG):
+Configuration uses `${XDG_CONFIG_HOME}/flymount/` when `XDG_CONFIG_HOME` is set,
+otherwise the default paths are:
 
 - `~/.config/flymount/flymount.conf`
 - `~/.config/flymount/targets.conf`
@@ -95,11 +107,16 @@ See `flymount.conf.example`.
 
 ## targets.conf
 
-Each non-comment line must have **exactly 7 space-separated fields**:
+Each non-comment line must have **exactly 7 whitespace-separated fields**
+(spaces or tabs):
 
 ```
 host user remote_path local_mount port identity_file sshfs_options
 ```
+
+Fields cannot contain spaces or tabs; shell-style quoting does not combine them.
+A `BASE_DIR` containing spaces is supported, so relative mount names can still
+resolve below a base directory such as `/home/user/My mounts`.
 
 Field meanings:
 
@@ -113,7 +130,7 @@ Field meanings:
 - `port` – SSH port in the range `1–65535` (e.g. `22`, `2222`)
 - `identity_file`:
   - `-` use default SSH config/agent
-  - `/path/to/key` explicit key; must be a readable regular file for mounting and dry-run
+  - `/path/to/key` explicit key; must be a readable regular file when a new mount or its dry-run preflight is needed (already mounted matching targets are skipped)
 - `sshfs_options`:
   - `-` none
   - `reconnect,ServerAliveInterval=15` (comma-separated)
@@ -208,10 +225,10 @@ shell wildcards.
 Status verifies both filesystem type (`fuse.sshfs`) and the exact configured
 `user@host:remote_path` source using `findmnt`. A different or unverifiable source
 is reported as `CONFLICT`, with exit status `1`. Mount and unmount operations
-also refuse conflicting mountpoints. Externally created mounts with a custom `fsname`/`subtype` or a differently
-spelled source may therefore require manual inspection and unmounting.
+also refuse conflicting mountpoints. Externally created mounts with a custom
+`fsname`/`subtype` or a differently spelled source may therefore require manual
+inspection and unmounting.
 
-Linux dependencies include `findmnt` (util-linux) and `realpath` (coreutils).
 
 ## Safety model (important)
 
@@ -220,36 +237,43 @@ Linux dependencies include `findmnt` (util-linux) and `realpath` (coreutils).
 
 If you want to mount outside `$HOME`, fix ownership/permissions on the mountpoint instead of using sudo.
 
-## Verified behavior
+## Tests and CI
 
-### Plan / validation
-- ✔️ Plan builds correctly
-- ✔️ Auto `local_mount = -` naming (with suffix on collisions)
-- ✔️ Duplicate local mountpoints → warn, keep first, skip later
-- ✔️ Malformed line / field shift detection
-- ✔️ Non-numeric port rejection
-- ✔️ Relative `remote_path` hint + explanatory note
+Run the automated checks locally:
 
-### Mounting
-- ✔️ Mount inside `$HOME`
-- ✔️ Mount outside `$HOME` with correct permissions
-- ✔️ Already mounted → SKIP
-- ✔️ Missing remote directory → clear failure
+```bash
+bash tests/run_tests.sh
+```
 
-### Unmount
-- ✔️ No active mounts
-- ✔️ Select specific mounts
-- ✔️ Non-interactive unmount (`--umount-all`, `--umount-select`)
-- ✔️ Invalid selection handling
+This checks Bash syntax, runs ShellCheck and executes ten isolated test scripts.
+Test dependencies and scoped ShellCheck exceptions are described in
+[CONTRIBUTING.md](CONTRIBUTING.md). SSHFS and a live server are not required for
+the automated suite: temporary HOME/config directories and test doubles isolate
+it from real user files, SSH connections and mounts.
 
-### Status
-- ✔️ Accurate MOUNTED / NOT output
+Coverage includes:
 
-ShellCheck: PASS
+- Config precedence, allowed options, malformed input, CRLF, Unicode and missing final newlines.
+- Dry-run without writes, preserved file content, paths with spaces, name collisions and path/permission errors.
+- Simulated connection/mount/unmount failures, continued processing, source conflicts and exit codes.
+- Safe installation/uninstallation and cleanup of test processes/resources after SIGINT/SIGTERM.
+
+GitHub Actions runs `tests.yml` (syntax and tests) and `shellcheck.yml` separately
+on PRs to `main`, pushes to `main` and manual dispatch. Both checks are required
+by branch protection. CI badges show **main push results**; inspect the PR checks
+for an unmerged change. The release badge shows the latest published GitHub
+release, which can differ from the development script's `--version`.
+
+Automated tests do not exercise real SSH authentication, network outages or kernel
+FUSE behavior. A separate [local SSHFS integration test](release-notes/local-validation-2026-09-12.md)
+previously verified real mounting, file reads/writes, status, source conflicts and
+unmount failures in WSL. That dated result is not a live integration check of
+every new commit. SIGKILL cleanup and non-Linux platforms are not covered.
 
 ## Release notes (GitHub)
 
-See the GitHub Releases page for version history.
+See [GitHub Releases](https://github.com/reptilebrain/flymount/releases) for published
+versions and [the v1.1.4 draft](release-notes/v1.1.4-draft.md) for pending changes.
 
 ## Disclaimer
 
