@@ -510,4 +510,69 @@ for option in reconnect=yes dir_cache dir_cache=maybe idmap=file uid=abc \
   done
 done
 
+# Dry-run handles spaces without creating directories or changing file content.
+reset_case
+export BASE_DIR="$TMP_DIR/dry run space"
+mkdir -p "$BASE_DIR/one" "$BASE_DIR/two"
+printf 'preserve bytes\000\377\n' > "$BASE_DIR/one/existing file"
+printf 'second file\n' > "$BASE_DIR/two/existing file"
+cp -a "$BASE_DIR" "$TMP_DIR/dry-before"
+run_cli --dry-run
+rc_is 0
+contains "DRY Mount user@first.example:/one -> $BASE_DIR/one"
+contains "DRY Mount user@second.example:/two -> $BASE_DIR/two"
+diff -r -- "$TMP_DIR/dry-before" "$BASE_DIR" || fail 'dry-run modified existing files'
+not_logged 'sshfs'
+not_logged 'unmount'
+export BASE_DIR="$TMP_DIR/new dry run space"
+run_cli --dry-run
+rc_is 0
+[[ ! -e "$BASE_DIR" ]] || fail 'dry-run created BASE_DIR with spaces'
+
+# CRLF in config/targets and a missing final newline are accepted together.
+reset_case
+printf 'BASE_DIR="%s/parser-base"\r\nCONNECT_TIMEOUT=7' "$TMP_DIR" > "$FLYMOUNT_CONFIG"
+printf '# comment\r\n\r\nfirst.example\tuser\t/one\tone\t22\t-\t-\r\nsecond.example user /two two 22 - -' > "$FLYMOUNT_TARGETS"
+run_cli --dry-run
+rc_is 0
+contains "$TMP_DIR/parser-base/one"
+contains "$TMP_DIR/parser-base/two"
+logged 'ConnectTimeout=7'
+logged 'user@first.example'
+logged 'user@second.example'
+[[ ! -e "$TMP_DIR/parser-base" ]] || fail 'parser dry-run created directories'
+
+# UTF-8 paths survive parsing as data; explicit names are not ASCII-sanitized.
+reset_case
+export BASE_DIR="$TMP_DIR/räksmörgås 資料"
+printf '%s\n' 'first.example user /資料/räkor arkiv-åäö 22 - -' > "$FLYMOUNT_TARGETS"
+run_cli --dry-run
+rc_is 0
+contains "user@first.example:/資料/räkor -> $BASE_DIR/arkiv-åäö"
+[[ ! -e "$BASE_DIR" ]] || fail 'Unicode dry-run created directories'
+
+# Long invalid numeric input is rejected without arithmetic overflow or a crash;
+# valid targets after it still receive their dry-run preflight.
+reset_case
+printf -v long_port '%010000d' 1
+printf 'first.example user /one one %s - -\nsecond.example user /two two 22 - -\n' "$long_port" > "$FLYMOUNT_TARGETS"
+run_cli --dry-run
+rc_is 1
+contains 'invalid port'
+logged 'user@second.example'
+not_logged 'user@first.example'
+not_logged 'sshfs'
+
+# Shell-looking text in configuration must remain literal, never executed.
+reset_case
+# Shell syntax must be literal input to the parser.
+# shellcheck disable=SC2016
+printf 'BASE_DIR=%s/$(touch${IFS}%s/should-not-exist)\n' "$TMP_DIR" "$TMP_DIR" > "$FLYMOUNT_CONFIG"
+run_cli --dry-run
+rc_is 0
+# Assert that the shell-looking text stays literal.
+# shellcheck disable=SC2016
+contains '$(touch${IFS}'
+[[ ! -e "$TMP_DIR/should-not-exist" ]] || fail 'configuration executed shell text'
+
 printf 'Audit regression tests passed.\n'
