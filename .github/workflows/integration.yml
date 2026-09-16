@@ -1,0 +1,31 @@
+name: Local SSHFS integration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies on disposable runner
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-server sshfs
+          sudo install -d -m 0755 /run/sshd
+          if [[ ! -e /dev/fuse ]]; then sudo modprobe fuse; fi
+          test -r /dev/fuse && test -w /dev/fuse
+
+      - name: Test real localhost SSH and SSHFS as a normal user
+        run: python3 tests/test_local_sshfs.py --run
